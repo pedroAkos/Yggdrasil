@@ -29,7 +29,21 @@ typedef enum reliable_p2p_events_{
 	FAILED_DELIVERY
 }reliable_p2p_events;
 
+typedef struct _reliable_p2p_args {
+    unsigned short ttl;
+    unsigned short time_to_resend;
+
+    unsigned short threshold;
+
+}reliable_p2p_args;
+
 proto_def * reliable_point2point_init(void * args);
 
+
+reliable_p2p_args* reliableP2PArgs_init(unsigned short ttl/**/,
+                                        unsigned short time_to_resend/**/,
+                                        unsigned short threshold/**/);
+
+void reliableP2PArgs_destroy(reliable_p2p_args* args);
 
 #endif /* PROTOCOLS_COMMUNICATION_POINT_TO_POINT_RELIABLE_H_ */

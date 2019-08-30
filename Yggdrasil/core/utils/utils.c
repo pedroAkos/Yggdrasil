@@ -77,16 +77,16 @@ void ygg_log_change_output(FILE* _out) {
 
 void ygg_log(char* proto, char* event, char* desc){
 	char buffer[26];
-	struct tm* tm_info;
+	struct tm tm_info;
 
 	struct timespec tp;
 	clock_gettime(CLOCK_REALTIME, &tp);
 	//gettimeofday(&tv,NULL);
 	pthread_mutex_lock(&loglock);
 
-	tm_info = localtime(&tp.tv_sec);
+	localtime_r(&tp.tv_sec, &tm_info);
 
-	strftime(buffer, 26, "%Y:%m:%d %H:%M:%S", tm_info);
+	strftime(buffer, 26, "%Y:%m:%d %H:%M:%S", &tm_info);
 
 	fprintf(out, "<%s> TIME: %s %ld :: [%s] : [%s] %s\n", hostname, buffer, tp.tv_nsec, proto, event, desc);
 	//printf("<%s> TIME: %ld %ld :: [%s] : [%s] %s\n", hostname, tv.tv_sec, tv.tv_usec, proto, event, desc);
@@ -95,15 +95,15 @@ void ygg_log(char* proto, char* event, char* desc){
 
 void ygg_log_multi(int n, ...) {
 	char buffer[26];
-	struct tm* tm_info;
+	struct tm tm_info;
 
 	struct timeval tv;
 	gettimeofday(&tv,NULL);
 	pthread_mutex_lock(&loglock);
 
-	tm_info = localtime(&tv.tv_sec);
+    localtime_r(&tv.tv_sec, &tm_info);
 
-	strftime(buffer, 26, "%Y:%m:%d %H:%M:%S", tm_info);
+	strftime(buffer, 26, "%Y:%m:%d %H:%M:%S", &tm_info);
 
 	fprintf(out, "<%s> TIME: %s %ld :: ", hostname, buffer, tv.tv_usec);
 
@@ -122,12 +122,12 @@ void ygg_log_multi(int n, ...) {
 
 void ygg_logflush() {
 	char buffer[26];
-	struct tm* tm_info;
+	struct tm tm_info;
 	struct timeval tv;
 	gettimeofday(&tv,NULL);
-	tm_info = localtime(&tv.tv_sec);
+    localtime_r(&tv.tv_sec, &tm_info);
 
-	strftime(buffer, 26, "%Y:%m:%d %H:%M:%S", tm_info);
+	strftime(buffer, 26, "%Y:%m:%d %H:%M:%S", &tm_info);
 	fprintf(out, "<%s> TIME: %s %ld :: [%s] : [%s] %s\n", hostname, buffer, tv.tv_usec, "YGG_RUNTIME", "QUIT", "Stopping process");
 	//printf("<%s> TIME: %ld %ld :: [%s] : [%s] %s\n", hostname, tv.tv_sec, tv.tv_usec, "YGG_RUNTIME", "QUIT", "Stopping process");
 	fflush(out);
@@ -135,16 +135,16 @@ void ygg_logflush() {
 
 void ygg_log_stdout(char* proto, char* event, char* desc) {
 	char buffer[26];
-	struct tm* tm_info;
+	struct tm tm_info;
 
 	struct timespec tp;
 	clock_gettime(CLOCK_REALTIME, &tp);
 	//gettimeofday(&tv,NULL);
 	pthread_mutex_lock(&loglock);
 
-	tm_info = localtime(&tp.tv_sec);
+    localtime_r(&tp.tv_sec, &tm_info);
 
-	strftime(buffer, 26, "%Y:%m:%d %H:%M:%S", tm_info);
+	strftime(buffer, 26, "%Y:%m:%d %H:%M:%S", &tm_info);
 
 	printf("<%s> TIME: %s %ld :: [%s] : [%s] %s\n", hostname, buffer, tp.tv_nsec, proto, event, desc);
 	//printf("<%s> TIME: %ld %ld :: [%s] : [%s] %s\n", hostname, tv.tv_sec, tv.tv_usec, proto, event, desc);
@@ -154,12 +154,12 @@ void ygg_log_stdout(char* proto, char* event, char* desc) {
 void ygg_logflush_stdout() {
 	if(out != stdout) {
 		char buffer[26];
-		struct tm* tm_info;
+		struct tm tm_info;
 		struct timeval tv;
 		gettimeofday(&tv,NULL);
-		tm_info = localtime(&tv.tv_sec);
+        localtime_r(&tv.tv_sec, &tm_info);
 
-		strftime(buffer, 26, "%Y:%m:%d %H:%M:%S", tm_info);
+		strftime(buffer, 26, "%Y:%m:%d %H:%M:%S", &tm_info);
 		printf("<%s> TIME: %s %ld :: [%s] : [%s] %s\n", hostname, buffer, tv.tv_usec, "YGG_RUNTIME", "QUIT", "Stopping process");
 		//printf("<%s> TIME: %ld %ld :: [%s] : [%s] %s\n", hostname, tv.tv_sec, tv.tv_usec, "YGG_RUNTIME", "QUIT", "Stopping process");
 		fflush(stdout);

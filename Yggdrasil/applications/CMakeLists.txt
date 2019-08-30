@@ -12,3 +12,4 @@ add_subdirectory(demos)
 add_subdirectory(tests)
 
 add_subdirectory("file transfer")
+add_subdirectory(tupleSpace)

@@ -14,7 +14,8 @@
 #define SEQNO_MAX 65535
 
 static short OGM = 0;
-static short MSG = 1;
+//static short MSG = 1;
+
 
 typedef struct stats_{
 
@@ -48,6 +49,7 @@ typedef struct _batman_state {
 
 	uuid_t my_id;
 	WLANAddr my_addr;
+	WLANAddr bcast_addr;
 
 	YggTimer* announce;
 	YggTimer* log_routing_table;
@@ -55,10 +57,25 @@ typedef struct _batman_state {
 	list* routing_table;
 	list* direct_links;
 
+	queue_t* dispatcher_queue;
+
 }batman_state;
+
+typedef struct _routing_info {
+    unsigned short msg_type;
+    unsigned short ttl;
+}routing_info;
+
+static bool is_bcast(WLANAddr* from, batman_state* state) {
+    return memcmp(from->data, state->bcast_addr.data, WLAN_ADDR_LEN) == 0;
+}
 
 static bool equal_entry_id(originator_entry* entry, uuid_t origin) {
 	return uuid_compare(entry->node_id, origin) == 0;
+}
+
+static bool equal_entry_mac(originator_entry* entry, WLANAddr* addr) {
+    return memcmp(entry->addr.data, addr->data, WLAN_ADDR_LEN) == 0;
 }
 
 static bool equal_ref(stats* hop, neighbour_item* tofind) {
@@ -93,9 +110,9 @@ static neighbour_item* set_best_hop(originator_entry* origin) {
 	return best;
 }
 
-static neighbour_item* find_best_next_hop(list* routing_table, uuid_t node_id) {
+static neighbour_item* find_best_next_hop(list* routing_table, WLANAddr* dest) {
 
-	originator_entry* entry = list_find_item(routing_table, (equal_function) equal_entry_id, node_id);
+	originator_entry* entry = list_find_item(routing_table, (equal_function) equal_entry_mac, dest);
 	if(entry)
 		return entry->best_hop;
 
@@ -304,7 +321,9 @@ static int update_origin_stats(batman_state* state, uuid_t origin, WLANAddr* ori
 
 static short process_msg(YggMessage* msg, batman_state* state) {
 
-	short type;
+    bool retrasnmit = false;
+    unsigned short* ttl_pos;
+    short type;
 	void* ptr = YggMessage_readPayload(msg, NULL, &type, sizeof(short));
 
 	if(type == OGM) {
@@ -339,7 +358,7 @@ static short process_msg(YggMessage* msg, batman_state* state) {
 			}
 		} else if(unidirectional_flag == 0) {
 
-			unsigned short* ttl_pos = (unsigned short*) ptr;
+			ttl_pos = (unsigned short*) ptr;
 			ptr = YggMessage_readPayload(msg, ptr, &omg_ttl, sizeof(unsigned short));
 			ptr = YggMessage_readPayload(msg, ptr, &omg_seq_number, sizeof(unsigned int));
 
@@ -356,51 +375,62 @@ static short process_msg(YggMessage* msg, batman_state* state) {
 				*uni_flag_ptr = 1;
 			}
 
-			int retrasnmit = update_origin_stats(state, origin, &origin_addr, trasnmiter, omg_ttl, omg_seq_number);
+			retrasnmit = update_origin_stats(state, origin, &origin_addr, trasnmiter, omg_ttl, omg_seq_number);
 
 			if(retrasnmit && omg_ttl >= 2) {
 				memcpy(id_ptr, state->my_id, sizeof(uuid_t));
-				*ttl_pos = *ttl_pos -1;
-				dispatch(msg);
-			}
+				retrasnmit = true;
+			} else
+			    retrasnmit = false;
+
 		}
 
-	} else if(type == MSG) {
-		//destination is me?
-		uuid_t destination;
-		ptr = YggMessage_readPayload(msg, ptr, destination, sizeof(uuid_t));
-		unsigned short* ttl_pos = (unsigned short*) ptr;
-		unsigned short msg_ttl;
-		ptr = YggMessage_readPayload(msg, ptr, &msg_ttl, sizeof(unsigned short));
 
-		if(uuid_compare(destination, state->my_id) == 0) {
+	} else  {
+		//destination is me?
+
+        ttl_pos = (unsigned short*) ptr;
+        unsigned short msg_ttl;
+        ptr = YggMessage_readPayload(msg, ptr, &msg_ttl, sizeof(unsigned short));
+        WLANAddr* src_addr = ptr;
+        unsigned short* proto_origin = (unsigned short*) (ptr+WLAN_ADDR_LEN);
+        ptr += sizeof(unsigned short)+WLAN_ADDR_LEN;
+        WLANAddr dest_addr;
+        ptr = YggMessage_readPayload(msg, ptr, dest_addr.data, WLAN_ADDR_LEN);
+
+
+		if(memcmp(dest_addr.data, state->my_addr.data, WLAN_ADDR_LEN) == 0) {
 			//yes
 			YggMessage todeliver;
-			ptr = YggMessage_readPayload(msg, ptr, &todeliver.Proto_id, sizeof(short));
+			todeliver.Proto_id = *proto_origin;
+			todeliver.header = msg->header;
+			todeliver.header.dst_addr.mac_addr = dest_addr;
+			todeliver.header.src_addr.mac_addr = *src_addr;
 			ptr = YggMessage_readPayload(msg, ptr, &todeliver.dataLen, sizeof(unsigned short));
-			if(todeliver.dataLen > 0) {
-				todeliver.data = malloc(todeliver.dataLen);
-				ptr = YggMessage_readPayload(msg, ptr, todeliver.data, todeliver.dataLen);
-			}else
-				todeliver.data = NULL;
-
-			YggMessage_addPayload(&todeliver, (void*) &msg_ttl, sizeof(unsigned short));
+			todeliver.data = ptr;
 
 			deliver(&todeliver);
-			YggMessage_freePayload(&todeliver);
 		} else {
 			//no
-			neighbour_item* next_hop = find_best_next_hop(state->routing_table, destination);
+			neighbour_item* next_hop = find_best_next_hop(state->routing_table, &dest_addr);
 			if(next_hop != NULL && msg_ttl > 0) {
 				memcpy(msg->header.dst_addr.mac_addr.data, next_hop->addr.data, WLAN_ADDR_LEN);
-				*ttl_pos = *ttl_pos -1;
-				dispatch(msg);
+				retrasnmit = true;
 			}
 			else
 				ygg_log("BATMAN", "NO ROUTE TO HOST", "dropping message");
 		}
 
 	}
+    if(retrasnmit) {
+        *ttl_pos = *ttl_pos -1;
+        queue_t_elem elem = {
+                .type = YGG_MESSAGE,
+                .data.msg = *msg,
+        };
+        queue_push(state->dispatcher_queue, &elem);
+    }
+    YggMessage_freePayload(msg);
 
 	return SUCCESS;
 }
@@ -456,7 +486,11 @@ static short process_timer(YggTimer* timer, batman_state* state) {
 		state->last_seq_number_sent = state->seq_number;
 		state->seq_number = (state->seq_number + 1) % SEQNO_MAX;
 
-		dispatch(&ogm);
+		queue_t_elem elem = {
+		        .type = YGG_MESSAGE,
+		        .data.msg = ogm,
+		};
+		queue_push(state->dispatcher_queue, &elem);
 		YggMessage_freePayload(&ogm);
 
 	} else
@@ -471,6 +505,68 @@ static short process_event(YggEvent* event, batman_state* state) {
 	return SUCCESS;
 }
 
+static short route(YggMessage* msg, batman_state* state) {
+
+
+    if(is_bcast(&msg->header.dst_addr.mac_addr, state)) {
+        queue_t_elem elem = {
+            .type =   YGG_MESSAGE,
+            .data.msg = *msg,
+
+        };
+        queue_push(state->dispatcher_queue, &elem);
+        YggMessage_freePayload(msg);
+    }
+
+    char log_msg[200];
+    bzero(log_msg, 200);
+    char str[33];
+    bzero(str, 33);
+    wlan2asc(&msg->header.dst_addr.mac_addr, str);
+    sprintf(log_msg, "trying to route message to %s", str);
+    ygg_log("BATMAN", "REQUEST", log_msg);
+
+    //find best next_hop
+    neighbour_item* next_hop = find_best_next_hop(state->routing_table, &msg->header.dst_addr.mac_addr);
+    if(next_hop == NULL) {
+        ygg_log("BATMAN", "NO ROUTE TO HOST", "dropping message");
+        return FAILED;
+    }
+
+    //build msg to be sent
+    /**     routing_info info = {
+    *           .msg_type = MSG,
+    *           .ttl = state->ttl,
+    *       };
+    */
+
+    void* buff = malloc(sizeof(unsigned short) + WLAN_ADDR_LEN);
+        memcpy(buff, &state->ttl, sizeof(unsigned short));
+        memcpy(buff+ sizeof(unsigned short), state->my_addr.data, WLAN_ADDR_LEN);
+
+    pushPayload(msg,(char *) buff, sizeof(unsigned short)+WLAN_ADDR_LEN, state->protoId, &next_hop->addr);
+
+    queue_t_elem elem = {
+            .type = YGG_MESSAGE,
+            .data.msg = *msg,
+    };
+
+    queue_push(state->dispatcher_queue, &elem);
+    free(buff);
+    YggMessage_freePayload(msg);
+
+    return SUCCESS;
+}
+
+static bool set_destination_mac(YggMessage* msg, uuid_t destination, batman_state* state) {
+    originator_entry* e = list_find_item(state->routing_table, (equal_function) equal_entry_id, destination);
+    if(e) {
+        msg->header.dst_addr.mac_addr = e->addr;
+        return true;
+    }
+    return false;
+}
+
 static short process_request(YggRequest* request, batman_state* state) {
 	if(request->request == REQUEST && request->request_type == SEND_MESSAGE) {
 
@@ -478,43 +574,27 @@ static short process_request(YggRequest* request, batman_state* state) {
 		uuid_t destination;
 		unload_request_route_message(request, &msg, destination);
 
-		char log_msg[200];
-		bzero(log_msg, 200);
-		char u1[37];
-		uuid_unparse(destination, u1);
-		sprintf(log_msg, "trying to route message to %s", u1);
-		ygg_log("BATMAN", "REQUEST", log_msg);
+        char log_msg[200];
+        bzero(log_msg, 200);
+        char u1[37];
+        uuid_unparse(destination, u1);
+        sprintf(log_msg, "trying to route message to %s", u1);
+        ygg_log("BATMAN", "REQUEST", log_msg);
 
-		//find best next_hop
-		neighbour_item* next_hop = find_best_next_hop(state->routing_table, destination);
-		if(next_hop == NULL) {
-			YggRequest reply;
-			YggRequest_init(&reply, state->protoId, request->proto_origin, REPLY, NO_ROUTE_TO_HOST);
-			deliverReply(&reply);
-			ygg_log("BATMAN", "NO ROUTE TO HOST", "dropping message");
-			return FAILED;
-		}
-		//build msg to be sent
-		YggMessage tosend;
-		YggMessage_init(&tosend, next_hop->addr.data, state->protoId);
+		if(!set_destination_mac(&msg, destination, state)) {
+            YggRequest reply;
+            YggRequest_init(&reply, state->protoId, request->proto_origin, REPLY, NO_ROUTE_TO_HOST);
+            deliverReply(&reply);
+            ygg_log("BATMAN", "NO ROUTE TO HOST", "dropping message");
+            return FAILED;
+        }
 
-		YggMessage_addPayload(&tosend, (char*) &MSG, sizeof(short));
-
-		YggMessage_addPayload(&tosend, (char*) destination, sizeof(uuid_t));
-		YggMessage_addPayload(&tosend, (char*) &state->ttl, sizeof(unsigned short));
-		YggMessage_addPayload(&tosend, (char*) &msg.Proto_id, sizeof(unsigned short));
-		YggMessage_addPayload(&tosend, (char*) &msg.dataLen, sizeof(unsigned short));
-		YggMessage_addPayload(&tosend, (char*) msg.data, msg.dataLen);
-
-		dispatch(&tosend);
-		YggMessage_freePayload(&tosend);
-		YggMessage_freePayload(&msg);
-
-		return SUCCESS;
+		return route(&msg, state);
 	}
 
 	return FAILED;
 }
+
 
 static void * batman_main_loop(main_loop_args* args) {
 
@@ -527,15 +607,27 @@ static void * batman_main_loop(main_loop_args* args) {
 
 		switch(elem.type) {
 		case YGG_MESSAGE:
-			process_msg(&elem.data.msg, state);
+		    if(elem.data.msg.Proto_id != state->protoId) { //not from me
+		        route(&elem.data.msg, state);
+		    } else
+			    process_msg(&elem.data.msg, state);
 			break;
 		case YGG_TIMER:
+            if(elem.data.timer.proto_dest != state->protoId) { //not for me
+                queue_push(state->dispatcher_queue, &elem);
+            }else
 			process_timer(&elem.data.timer, state);
 			break;
 		case YGG_EVENT:
+            if(elem.data.event.proto_dest != state->protoId) { //not for me
+                queue_push(state->dispatcher_queue, &elem);
+            }else
 			process_event(&elem.data.event, state);
 			break;
 		case YGG_REQUEST:
+            if(elem.data.request.proto_dest != state->protoId) { //not for me
+                queue_push(state->dispatcher_queue, &elem);
+            }else
 			process_request(&elem.data.request, state);
 			break;
 		default:
@@ -592,6 +684,7 @@ proto_def* batman_init(void* args) {
 
 	getmyId(state->my_id);
 	setMyAddr(&state->my_addr);
+	setBcastAddr(&state->bcast_addr);
 
 	state->direct_links = list_init();
 	state->routing_table = list_init();
@@ -603,6 +696,8 @@ proto_def* batman_init(void* args) {
 		state->protoId = PROTO_ROUTING;
 	else
 		state->protoId = PROTO_ROUTING_BATMAN;
+
+	state->dispatcher_queue = interceptProtocolQueue(PROTO_DISPATCH, state->protoId);
 
 	proto_def* batman =  create_protocol_definition(state->protoId, "BATMAN", state, (Proto_destroy) batman_destroy);
 

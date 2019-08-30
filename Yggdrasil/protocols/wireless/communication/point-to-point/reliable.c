@@ -11,11 +11,11 @@
 
 #include "reliable.h"
 
-#define TIME_TO_LIVE 5
-#define TIME_TO_RESEND 2
-#define TIMER 2 //2 seconds
+//#define TIME_TO_LIVE 5
+//#define TIME_TO_RESEND 2
+//#define TIMER 2 //2 seconds
 
-#define THRESHOLD 5 //five times resend
+//#define THRESHOLD 5 //five times resend
 
 #define PANIC -1
 #define DUPLICATE 0
@@ -48,6 +48,10 @@ typedef struct meta_info_{
 typedef struct _reliable_state{
 	short proto_id;
 	unsigned short sqn;
+
+	unsigned short ttl;
+	unsigned short time_to_resend;
+	unsigned short threshold;
 
 	list* outbound_msgs;
 	list* inbound_msgs;
@@ -154,11 +158,11 @@ static short rm_inbond(p2p_reliable_state* state){
 	list_item* it = state->inbound_msgs->head;
 	while(it != NULL){
 		destination* dest = it->data;
-		if(dest->first != 0 &&  dest->first + TIME_TO_LIVE <  time(NULL)){
+		if(dest->first != 0 &&  dest->first + state->ttl <  time(NULL)){
 			list_item* it2 = dest->msg_list->head;
 			while(it2 != NULL) {
 				pending_msg* m = it2->data;
-				if(m->time + TIME_TO_LIVE < time(NULL)){
+				if(m->time + state->ttl < time(NULL)){
 					pending_msg* torm = list_remove_head(dest->msg_list);
 					if(dest->msg_list->head != NULL) {
 						m = dest->msg_list->head->data;
@@ -293,10 +297,12 @@ static void * reliable_point2point_main_loop(main_loop_args* args){
 				list_item* prev = NULL;
 				while(it2 != NULL){
 					pending_msg* m = it2->data;
-					if(m->resend > THRESHOLD){
+					if(m->resend > state->threshold){
 
-						if(prev == NULL)
+						if(prev == NULL) {
+						    it2 = it2->next;
 							m = list_remove_head(dest->msg_list);
+						}
 						else {
 							m = list_remove(dest->msg_list, prev);
 							if(prev == dest->msg_list->tail)
@@ -309,10 +315,11 @@ static void * reliable_point2point_main_loop(main_loop_args* args){
 						YggMessage_freePayload(m->msg);
 						free(m->msg);
 						free(m);
-					}else if(m->time + TIME_TO_RESEND < time(NULL)){
+					}else if(m->time + state->time_to_resend < time(NULL)){
 
 						elem.type = YGG_MESSAGE;
-						memcpy(&elem.data.msg, m->msg, sizeof(YggMessage));
+						elem.data.msg = *m->msg;
+						//memcpy(&elem.data.msg, m->msg, sizeof(YggMessage));
 
 						queue_push(state->dispatcher_queue, &elem);
 
@@ -334,10 +341,12 @@ static void * reliable_point2point_main_loop(main_loop_args* args){
 			rm_inbond(state);
 
 		}else{
-			ygg_log("RELIABLE POINT2POINT", "WARNING", "Got something unexpected");
+		    queue_push(state->dispatcher_queue, &elem);
+			//ygg_log("RELIABLE POINT2POINT", "WARNING", "Got something unexpected");
+            free_elem_payload(&elem);
 		}
 
-		free_elem_payload(&elem);
+
 	}
 
 	return NULL;
@@ -383,17 +392,31 @@ proto_def* reliable_point2point_init(void* args) {
 	setBcastAddr(&state->bcastAddr);
 	state->sqn = 1;
 
+	state->threshold = ((reliable_p2p_args*)args)->threshold;
+    state->ttl = ((reliable_p2p_args*)args)->ttl;
+    state->time_to_resend = ((reliable_p2p_args*)args)->time_to_resend;
+
 	proto_def* p2p_reliable = create_protocol_definition(state->proto_id, "Reliable P2P delivery", state, (Proto_destroy) reliable_p2p_destroy);
 	proto_def_add_protocol_main_loop(p2p_reliable, (Proto_main_loop) reliable_point2point_main_loop);
 	proto_def_add_produced_events(p2p_reliable, 1);
 
 	state->garbage_collect = malloc(sizeof(YggTimer));
 	YggTimer_init(state->garbage_collect, state->proto_id, state->proto_id);
-	YggTimer_set(state->garbage_collect, TIMER, 0, TIMER, 0);
+	YggTimer_set(state->garbage_collect, state->time_to_resend/2, 0, state->time_to_resend/2, 0);
 	setupTimer(state->garbage_collect);
 
 	return p2p_reliable;
 
 }
 
+reliable_p2p_args* reliableP2PArgs_init(unsigned short ttl, unsigned short time_to_resend, unsigned short threshold) {
+    reliable_p2p_args* args = malloc(sizeof(reliable_p2p_args));
+    args->ttl = ttl;
+    args->time_to_resend = time_to_resend;
+    args->threshold = threshold;
+}
+
+void reliableP2PArgs_destroy(reliable_p2p_args* args) {
+    free(args);
+}
 
