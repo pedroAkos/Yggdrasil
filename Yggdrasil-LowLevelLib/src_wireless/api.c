@@ -350,6 +350,7 @@ int chsend(Channel* ch, YggPhyMessage* message) {
 	struct sockaddr_ll to = {0};
 	setToAddress(&message->phyHeader.destAddr, ch->ifindex, &to);
 
+	usleep((((unsigned int)rand())%100)+1);
 	int sent=sendto(
 			ch->sockid,
 			message, (WLAN_HEADER_LEN+YGG_HEADER_LEN+(sizeof(unsigned short))+ntohs(message->dataLen)), //sizeof(YggPhyMessage)
@@ -394,6 +395,16 @@ int chreceive(Channel* ch, YggPhyMessage* message) {
 	// wait and receive a frame
 	int recv = recvfrom(ch->sockid, message, DEFAULT_MTU,//sizeof(LKMessage),
 			0, (struct sockaddr *) &from, &fromlen);
+
+    if(!isYggMessage((void*)message, recv)) {
+        fprintf(stderr, "WARNING: Received invalid message:\n");
+        for(int i = 0; i < recv; i++) {
+            fprintf(stderr, "%x ", ((char*)message)[i]);
+        }
+        fprintf(stderr, "\n");
+
+        recv = -1;
+    }
 
 	if(recv < 0) return CHANNEL_RECV_ERROR;
 

@@ -101,7 +101,40 @@ if (pthread_mutex_unlock(&log_mutex)) perror("pthread_mutex_unlock");
    if (logptr<sizeof(logbuf)-80) { logptr += sprintf(logbuf+logptr, fmt, ##a); }
 #define LOGTUPLE(s)    print_tuple(s);
 
-#define DUMPLOG logbuf[logptr] = '\0'; printf("%s", logbuf); logptr = 0;
+
+void print_tuple_local(struct tuple* t, char* buff) {
+    bzero(buff, 100);
+
+    int i = 0;
+    buff[i] = '('; i++;
+
+    struct element e = t->elements[0];
+    unsigned char* s = (unsigned char*)e.data.s.ptr;
+    int n = e.data.s.len;
+
+    for(int j = 0; j < n; j++) {
+        buff[i] = s[j];
+        i++;
+    }
+
+    buff[i] = ','; i++;
+    i += sprintf(buff+i, "%d", t->elements[1].data.i);
+
+    buff[i] = ','; i++;
+
+    e = t->elements[4];
+    s = (unsigned char*)e.data.s.ptr;
+    n = e.data.s.len;
+
+    for(int j = 0; j < n; j++) {
+        buff[i] = s[j];
+        i++;
+    }
+
+    buff[i] = ')';
+}
+
+#define LOGTUPLE_LOCAL(s, buff)    print_tuple_local(s, buff);
 
 /**
  * \brief Doubly-linked list of tuples, for efficient insertions and
@@ -128,7 +161,7 @@ static struct ttuple *last_message = NULL;
 
 
 
-#define MAXNUMTHREADS 64
+#define MAXNUMTHREADS 16
 
 /**
  * Maintain a list of the clients currently trying to access tuple
@@ -301,6 +334,8 @@ handle_get_read(struct context *ctx,
 	struct ttuple *p;
 	int clientnr = ctx - client_list;
 
+	char buff[100];
+
 #if 0
 	GETLOG;
 	LOGPRINTF("%s(%d) wants a tuple:", ctx->peername, ctx->id);
@@ -319,8 +354,10 @@ handle_get_read(struct context *ctx,
 				GETLOG;
 				LOGPRINTF("%s(%d) %s a tuple:", ctx->peername, ctx->id, (remove)?"gets":"reads");
 				LOGTUPLE(p->tuple);
-				DUMPLOG;
 				YIELDLOG;
+
+				LOGTUPLE_LOCAL(p->tuple, buff);
+				printf("%s(%d) %s a tuple: %s\n", ctx->peername, ctx->id, (remove)?"gets":"reads", buff);
 
 				WLANAddr dest = ctx->msg.header.src_addr.mac_addr;
 				init_msg(&ctx->msg, ctx->peername, ctx->msg.Proto_id, ctx->server_ygg_id);
@@ -333,7 +370,7 @@ handle_get_read(struct context *ctx,
 					 */
 					LOGPRINTF("send_tuple failed\n");
 					LOGTUPLE(s);
-					DUMPLOG;
+
 					DBGPRINTF("remove=%d\n", remove);
 					if (remove) {
 						add_tuple_to_space(p->tuple);
@@ -427,7 +464,6 @@ handle_replace(struct context *ctx, struct tuple *template, struct tuple *replac
 	GETLOG;
 	LOGPRINTF("%s(%d) replaced %d tuples with:", ctx->peername, ctx->id, del_count);
 	LOGTUPLE(replacement);
-	DUMPLOG;
 	YIELDLOG;
 
 	status_list[clientnr]='p';
@@ -574,9 +610,11 @@ client_thread_func(void *varg)
 		GETLOG;
 		LOGPRINTF("%s(%d) puts a tuple:", ctx->peername, ctx->id);
 		LOGTUPLE(s);
-		DUMPLOG;
 		YIELDLOG;
 #endif
+		char buff[100];
+        LOGTUPLE_LOCAL(s, buff);
+        printf("%s(%d) puts a tuple: %s\n", ctx->peername, ctx->id, buff);
 		add_tuple_to_space(s);
 		// Why is this??? - Bram
 		/* send an ack */
@@ -730,7 +768,7 @@ main(int argc, char *argv[])
 
 	pthread_setconcurrency(MAXNUMTHREADS);
 	pthread_attr_init(&threadattrs);
-	pthread_attr_setdetachstate(&threadattrs, 1);
+	pthread_attr_setdetachstate(&threadattrs, PTHREAD_CREATE_DETACHED);
 	// We should not waste memory resource so use small stack sizes
 	pthread_attr_getstacksize(&threadattrs, &stacksz);
 //	stacksz = PTHREAD_STACK_MIN;
@@ -768,11 +806,11 @@ main(int argc, char *argv[])
 
     ygg_runtime_init(ntconf);
 
-    batman_args* bargs = batman_args_init(false, false, 2, 0, 5, DEFAULT_BATMAN_WINDOW_SIZE, 3);
+    batman_args* bargs = batman_args_init(false, false, 2, 0,16, DEFAULT_BATMAN_WINDOW_SIZE, 0);
     registerProtocol(PROTO_ROUTING_BATMAN, batman_init, bargs);
     batman_args_destroy(bargs);
 
-    reliable_p2p_args* rargs = reliableP2PArgs_init(10, 2, 5);
+    reliable_p2p_args* rargs = reliableP2PArgs_init(10, 0, 500000000, 5);
     registerProtocol(PROTO_P2P_RELIABLE_DELIVERY, reliable_point2point_init, rargs);
     reliableP2PArgs_destroy(rargs);
 
@@ -780,6 +818,7 @@ main(int argc, char *argv[])
     short server_id = 500;
 
     app_def* myapp = create_application_definition(server_id, "MyApp");
+    app_def_add_consumed_events(myapp, PROTO_P2P_RELIABLE_DELIVERY, FAILED_DELIVERY);
     queue_t* inBox = registerApp(myapp);
 
     ygg_runtime_start();

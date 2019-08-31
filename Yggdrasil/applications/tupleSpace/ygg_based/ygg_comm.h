@@ -11,7 +11,7 @@ void init_msg(YggMessage* msg, char* peername, unsigned short dest_id, unsigned 
 
 short send_to_destination(YggMessage* msg);
 
-bool delivery(YggMessage* msg, void** ptr, queue_t* inBox);
+bool delivery(YggMessage* msg, void** ptr, queue_t* inBox, unsigned short self_id);
 
 void wait_delivery(YggMessage* msg, void** ptr, queue_t* inBox);
 

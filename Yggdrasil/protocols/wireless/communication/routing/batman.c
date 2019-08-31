@@ -61,10 +61,7 @@ typedef struct _batman_state {
 
 }batman_state;
 
-typedef struct _routing_info {
-    unsigned short msg_type;
-    unsigned short ttl;
-}routing_info;
+
 
 static bool is_bcast(WLANAddr* from, batman_state* state) {
     return memcmp(from->data, state->bcast_addr.data, WLAN_ADDR_LEN) == 0;
@@ -119,6 +116,32 @@ static neighbour_item* find_best_next_hop(list* routing_table, WLANAddr* dest) {
 	return NULL;
 }
 
+static void print_routing_table(batman_state* state) {
+    list_item* it = state->routing_table->head;
+    ygg_log("BATMAN", "INFO", "Printing routing Table");
+    while(it != NULL) {
+        originator_entry* omg_entry = it->data;
+        char entry[200];
+        bzero(entry, 200);
+        char origin[37], origin_mac[33], best[37], best_mac[33];
+        bzero(origin, 37);  bzero(origin_mac, 33); bzero(best, 37); bzero(best_mac, 33);
+        uuid_unparse(omg_entry->node_id, origin); wlan2asc(&omg_entry->addr, origin_mac);
+        if(omg_entry->best_hop != NULL) {
+            uuid_unparse(omg_entry->best_hop->id, best); wlan2asc(&omg_entry->best_hop->addr, best_mac);
+            stats* hop = find_hop(omg_entry->best_next_hops, omg_entry->best_hop);
+
+            sprintf(entry, "Origin: %s - %s route: %s - %s (%d)", origin, origin_mac, best, best_mac, hop->packet_count);
+        } else {
+            sprintf(entry, "Origin: %s - %s no suitable route", origin, origin_mac);
+        }
+
+        ygg_log("BATMAN", "ROUTING TABLE", entry);
+
+        it = it->next;
+    }
+    ygg_log("BATMAN", "INFO", "Ended");
+}
+
 static int is_in_window(unsigned short omg_seq_number, int upperbound, int lowerbound) {
 	if(lowerbound > upperbound) { //window is splitted in half
 		//omg seq number is in upper half of the window or omg seq number is in lower half
@@ -161,7 +184,7 @@ static int out_of_range(originator_entry* origin, unsigned short omg_seq_number,
 					torm++;
 			}
 
-			//printf("drop %d packets for %s\n", torm, u1);
+			//printf("drop %d packets for %d\n", torm, origin);
 			entry->packet_count -= torm;
 			if(tomove < window_size) {
 				short newWindow[window_size];
@@ -398,7 +421,6 @@ static short process_msg(YggMessage* msg, batman_state* state) {
         WLANAddr dest_addr;
         ptr = YggMessage_readPayload(msg, ptr, dest_addr.data, WLAN_ADDR_LEN);
 
-
 		if(memcmp(dest_addr.data, state->my_addr.data, WLAN_ADDR_LEN) == 0) {
 			//yes
 			YggMessage todeliver;
@@ -411,14 +433,29 @@ static short process_msg(YggMessage* msg, batman_state* state) {
 
 			deliver(&todeliver);
 		} else {
+//            char src_str[33], via_str[33], dst_str[33], to_send[33]; bzero(src_str, 33);  bzero(via_str, 33); bzero(dst_str, 33); bzero(to_send, 33);
+//            wlan2asc(src_addr, src_str);
+//            wlan2asc(&msg->header.src_addr.mac_addr, via_str);
+//            wlan2asc(&dest_addr, dst_str);
+//            printf("routing msg from %s via %s to %s ttl: %d", src_str, via_str, dst_str, msg_ttl);
 			//no
 			neighbour_item* next_hop = find_best_next_hop(state->routing_table, &dest_addr);
 			if(next_hop != NULL && msg_ttl > 0) {
 				memcpy(msg->header.dst_addr.mac_addr.data, next_hop->addr.data, WLAN_ADDR_LEN);
 				retrasnmit = true;
+//				wlan2asc(&msg->header.dst_addr.mac_addr, to_send);
+//				printf(" next hop: %s\n", to_send);
 			}
-			else
-				ygg_log("BATMAN", "NO ROUTE TO HOST", "dropping message");
+			else {
+			    printf("\n");
+                char log_msg[200]; bzero(log_msg, 200);
+                char src_str[33], dst_str[33]; bzero(src_str, 33); bzero(dst_str, 33);
+                wlan2asc(src_addr, src_str);
+                wlan2asc(&dest_addr, dst_str);
+                sprintf(log_msg, "dropping msg from %s to %s", src_str, dst_str);
+                ygg_log("BATMAN", "NO ROUTE TO HOST", log_msg);
+                //print_routing_table(state);
+            }
 		}
 
 	}
@@ -433,33 +470,6 @@ static short process_msg(YggMessage* msg, batman_state* state) {
     YggMessage_freePayload(msg);
 
 	return SUCCESS;
-}
-
-static void print_routing_table(batman_state* state) {
-	list_item* it = state->routing_table->head;
-	ygg_log("BATMAN", "INFO", "Printing routing Table");
-	while(it != NULL) {
-		originator_entry* omg_entry = it->data;
-		char entry[200];
-		bzero(entry, 200);
-		char origin[37];
-		char best[37];
-		bzero(best, 37);
-		uuid_unparse(omg_entry->node_id, origin);
-		if(omg_entry->best_hop != NULL) {
-			uuid_unparse(omg_entry->best_hop->id, best);
-			stats* hop = find_hop(omg_entry->best_next_hops, omg_entry->best_hop);
-
-			sprintf(entry, "Origin: %s route: %s (%d)", origin, best, hop->packet_count);
-		} else {
-			sprintf(entry, "Origin: %s no suitable route", origin);
-		}
-
-		ygg_log("BATMAN", "ROUTING TABLE", entry);
-
-		it = it->next;
-	}
-	ygg_log("BATMAN", "INFO", "Ended");
 }
 
 static short process_timer(YggTimer* timer, batman_state* state) {
@@ -518,18 +528,24 @@ static short route(YggMessage* msg, batman_state* state) {
         YggMessage_freePayload(msg);
     }
 
-    char log_msg[200];
-    bzero(log_msg, 200);
-    char str[33];
-    bzero(str, 33);
-    wlan2asc(&msg->header.dst_addr.mac_addr, str);
-    sprintf(log_msg, "trying to route message to %s", str);
-    ygg_log("BATMAN", "REQUEST", log_msg);
+//    char log_msg[200];
+//    bzero(log_msg, 200);
+//    char str[33];
+//    bzero(str, 33);
+//    wlan2asc(&msg->header.dst_addr.mac_addr, str);
+//    sprintf(log_msg, "trying to route message to %s", str);
+//    ygg_log("BATMAN", "REQUEST", log_msg);
 
     //find best next_hop
     neighbour_item* next_hop = find_best_next_hop(state->routing_table, &msg->header.dst_addr.mac_addr);
     if(next_hop == NULL) {
-        ygg_log("BATMAN", "NO ROUTE TO HOST", "dropping message");
+        char log_msg[200]; bzero(log_msg, 200);
+        char src_str[33], dst_str[33]; bzero(src_str, 33); bzero(dst_str, 33);
+        wlan2asc(&msg->header.src_addr.mac_addr, src_str);
+        wlan2asc(&msg->header.dst_addr.mac_addr, dst_str);
+        sprintf(log_msg, "dropping msg from %s to %s", src_str, dst_str);
+        ygg_log("BATMAN", "NO ROUTE TO HOST", log_msg);
+        //print_routing_table(state);
         return FAILED;
     }
 
@@ -574,12 +590,12 @@ static short process_request(YggRequest* request, batman_state* state) {
 		uuid_t destination;
 		unload_request_route_message(request, &msg, destination);
 
-        char log_msg[200];
-        bzero(log_msg, 200);
-        char u1[37];
-        uuid_unparse(destination, u1);
-        sprintf(log_msg, "trying to route message to %s", u1);
-        ygg_log("BATMAN", "REQUEST", log_msg);
+//        char log_msg[200];
+//        bzero(log_msg, 200);
+//        char u1[37];
+//        uuid_unparse(destination, u1);
+//        sprintf(log_msg, "trying to route message to %s", u1);
+//        ygg_log("BATMAN", "REQUEST", log_msg);
 
 		if(!set_destination_mac(&msg, destination, state)) {
             YggRequest reply;
@@ -616,19 +632,19 @@ static void * batman_main_loop(main_loop_args* args) {
             if(elem.data.timer.proto_dest != state->protoId) { //not for me
                 queue_push(state->dispatcher_queue, &elem);
             }else
-			process_timer(&elem.data.timer, state);
+			    process_timer(&elem.data.timer, state);
 			break;
 		case YGG_EVENT:
             if(elem.data.event.proto_dest != state->protoId) { //not for me
                 queue_push(state->dispatcher_queue, &elem);
             }else
-			process_event(&elem.data.event, state);
+			    process_event(&elem.data.event, state);
 			break;
 		case YGG_REQUEST:
             if(elem.data.request.proto_dest != state->protoId) { //not for me
                 queue_push(state->dispatcher_queue, &elem);
             }else
-			process_request(&elem.data.request, state);
+			    process_request(&elem.data.request, state);
 			break;
 		default:
 			break;

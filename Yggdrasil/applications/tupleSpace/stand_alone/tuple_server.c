@@ -97,7 +97,39 @@ if (pthread_mutex_unlock(&log_mutex)) perror("pthread_mutex_unlock");
    if (logptr<sizeof(logbuf)-80) { logptr += sprintf(logbuf+logptr, fmt, ##a); }
 #define LOGTUPLE(s)    print_tuple(s);
 
-#define DUMPLOG logbuf[logptr] = '\0'; printf("%s", logbuf); logptr = 0;
+void print_tuple_local(struct tuple* t, char* buff) {
+    bzero(buff, 100);
+
+    int i = 0;
+    buff[i] = '('; i++;
+
+    struct element e = t->elements[0];
+    unsigned char* s = (unsigned char*)e.data.s.ptr;
+    int n = e.data.s.len;
+
+    for(int j = 0; j < n; j++) {
+        buff[i] = s[j];
+        i++;
+    }
+
+    buff[i] = ','; i++;
+    i += sprintf(buff+i, "%d", t->elements[1].data.i);
+
+    buff[i] = ','; i++;
+
+    e = t->elements[4];
+    s = (unsigned char*)e.data.s.ptr;
+    n = e.data.s.len;
+
+    for(int j = 0; j < n; j++) {
+        buff[i] = s[j];
+        i++;
+    }
+
+    buff[i] = ')';
+}
+
+#define LOGTUPLE_LOCAL(s, buff)    print_tuple_local(s, buff);
 
 /**
  * \brief Doubly-linked list of tuples, for efficient insertions and
@@ -124,7 +156,7 @@ static struct ttuple *last_message = NULL;
 
 
 
-#define MAXNUMTHREADS 64
+#define MAXNUMTHREADS 16
 
 /**
  * Maintain a list of the clients currently trying to access tuple
@@ -299,6 +331,8 @@ handle_get_read(struct context *ctx,
 	struct ttuple *p;
 	int clientnr = ctx - client_list;
 
+    char buff[100];
+
 #if 0
 	GETLOG;
 	LOGPRINTF("%s(%d) wants a tuple:", ctx->peername, ctx->id);
@@ -317,8 +351,12 @@ handle_get_read(struct context *ctx,
 				GETLOG;
 				LOGPRINTF("%s(%d) %s a tuple:", ctx->peername, ctx->id, (remove)?"gets":"reads");
 				LOGTUPLE(p->tuple);
-				DUMPLOG;
 				YIELDLOG;
+
+
+                LOGTUPLE_LOCAL(p->tuple, buff);
+                printf("%s(%d) %s a tuple: %s\n", ctx->peername, ctx->id, (remove)?"gets":"reads", buff);
+
 				if (send_tuple(ctx, p->tuple)) {
 					PRINTF("send_tuple failed\n");
 					/* Assume the client died while blocked.
@@ -327,7 +365,6 @@ handle_get_read(struct context *ctx,
 					 */
 					LOGPRINTF("send_tuple failed\n");
 					LOGTUPLE(s);
-					DUMPLOG;
 					DBGPRINTF("remove=%d\n", remove);
 					if (remove) {
 						add_tuple_to_space(p->tuple);
@@ -412,7 +449,6 @@ handle_replace(struct context *ctx, struct tuple *template, struct tuple *replac
 	GETLOG;
 	LOGPRINTF("%s(%d) replaced %d tuples with:", ctx->peername, ctx->id, del_count);
 	LOGTUPLE(replacement);
-	DUMPLOG;
 	YIELDLOG;
 
 	status_list[clientnr]='p';
@@ -560,9 +596,11 @@ client_thread_func(void *varg)
 		GETLOG;
 		LOGPRINTF("%s(%d) puts a tuple:", ctx->peername, ctx->id);
 		LOGTUPLE(s);
-		DUMPLOG;
 		YIELDLOG;
 #endif
+        char buff[100];
+        LOGTUPLE_LOCAL(s, buff);
+        printf("%s(%d) puts a tuple: %s\n", ctx->peername, ctx->id, buff);
 		add_tuple_to_space(s);
 		// Why is this??? - Bram
 		/* send an ack */
@@ -759,7 +797,7 @@ main(int argc, char *argv[])
 		exit(1);
 	}
 
-	status = listen(server_sock, MAXNUMTHREADS);
+	status = listen(server_sock, MAXNUMTHREADS*4);
 	if (status < 0) {
 		fprintf(stderr, __FILE__ " line %d\n", __LINE__);
 		perror("listen() failed");

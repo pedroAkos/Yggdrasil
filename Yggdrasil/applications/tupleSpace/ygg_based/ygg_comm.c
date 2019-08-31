@@ -22,27 +22,39 @@ short send_to_destination(YggMessage* msg) {
     YggMessage_freePayload(msg);
 }
 
-bool delivery(YggMessage* msg, void** ptr, queue_t* inBox) {
+bool delivery(YggMessage* msg, void** ptr, queue_t* inBox, unsigned short self_id) {
 
     struct timespec uptotime;
     clock_gettime(CLOCK_REALTIME, &uptotime);
-    //uptotime.tv_sec+=10; //because. (basically tcp timeout)
+    uptotime.tv_sec+=10; //because. (basically tcp timeout)
 
-    queue_t_elem elem;
-    queue_pop(inBox, &elem);
-    //if(queue_try_timed_pop(inBox, &uptotime, &elem) == 1) {
-        if(elem.type == YGG_MESSAGE) { //it should be
-            *msg = elem.data.msg;
-            *ptr = YggMessage_readPayload(msg, NULL, &msg->Proto_id, sizeof(unsigned short));
-            return true;
+    while(1) {
+        queue_t_elem elem;
+        //queue_pop(inBox, &elem);
+        if (queue_try_timed_pop(inBox, &uptotime, &elem) == 1) {
+            if (elem.type == YGG_MESSAGE) { //it should be
+                *msg = elem.data.msg;
+                *ptr = YggMessage_readPayload(msg, NULL, &msg->Proto_id, sizeof(unsigned short));
+                return true;
+            } else if (elem.type == YGG_EVENT) {
+                msg = elem.data.event.payload;
+                if (*((unsigned short *) msg->data) == self_id) {
+                    free_elem_payload(&elem);
+                    printf("Failed to deliver message for protocol %d\n", self_id);
+                    return false;
+                }
+                free_elem_payload(&elem);
+
+            } else {
+                printf("MAJOR PANIC\n");
+                free_elem_payload(&elem);
+                return false;
+            }
         } else {
-            printf("MAJOR PANIC\n");
-            free_elem_payload(&elem);
+            printf("Operation timed out\n");
             return false;
         }
-
-//    } else
-//        return false;
+    }
 
 }
 
@@ -56,7 +68,14 @@ void wait_delivery(YggMessage* msg, void** ptr, queue_t* inBox) {
             *msg = elem.data.msg;
             *ptr = YggMessage_readPayload(msg, NULL, &msg->Proto_id, sizeof(unsigned short));
             break;
-        }else {
+        } else if(elem.type == YGG_EVENT) {
+            msg = elem.data.event.payload;
+            char str[33]; bzero(str, 33);
+            wlan2asc(&msg->header.dst_addr.mac_addr, str);
+            printf("Failed to deliver message for protocol %d in %s\n", msg->Proto_id, str);
+            free_elem_payload(&elem);
+
+        } else {
             printf("MAJOR PANIC\n");
             free_elem_payload(&elem);
         }

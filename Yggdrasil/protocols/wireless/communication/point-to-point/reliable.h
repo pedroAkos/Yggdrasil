@@ -16,6 +16,8 @@
 #include <time.h>
 #include <string.h>
 
+#include <limits.h>
+
 #include "core/ygg_runtime.h"
 #include "src_wireless/Yggdrasil_wireless_lowlvl.h"
 
@@ -31,7 +33,8 @@ typedef enum reliable_p2p_events_{
 
 typedef struct _reliable_p2p_args {
     unsigned short ttl;
-    unsigned short time_to_resend;
+    unsigned short time_to_resend_s;
+    unsigned long time_to_resend_ns;
 
     unsigned short threshold;
 
@@ -41,7 +44,8 @@ proto_def * reliable_point2point_init(void * args);
 
 
 reliable_p2p_args* reliableP2PArgs_init(unsigned short ttl/**/,
-                                        unsigned short time_to_resend/**/,
+                                        unsigned short time_to_resend_s/**/,
+                                        unsigned long time_to_resend_ns,
                                         unsigned short threshold/**/);
 
 void reliableP2PArgs_destroy(reliable_p2p_args* args);

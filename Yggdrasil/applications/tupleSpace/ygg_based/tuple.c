@@ -697,7 +697,7 @@ put_tuple(struct tuple *s, struct context *ctx)
 
 	send_to_destination(&ctx->msg);
 
-	if(delivery(&ctx->msg, &ctx->ptr, ctx->inBox)) {
+	if(delivery(&ctx->msg, &ctx->ptr, ctx->inBox, ctx->ygg_id)) {
 
 #if 1 // Why is this? - Bram
         if (recv_chunk(ctx, (char *) &op, sizeof(int))) {
@@ -707,7 +707,12 @@ put_tuple(struct tuple *s, struct context *ctx)
         assert(op == PUT);
 #endif
 
-    }
+    } else {
+        ctx->id=0;
+        ctx->ptr = NULL;
+        YggMessage_freePayload(&ctx->msg);
+        return 1;
+	}
 	ctx->id=0;
 	ctx->ptr = NULL;
 	YggMessage_freePayload(&ctx->msg);
@@ -741,7 +746,7 @@ replace_tuple(struct tuple *template, struct tuple *replacement, struct context 
 
     send_to_destination(&ctx->msg);
 
-    if(delivery(&ctx->msg, &ctx->ptr, ctx->inBox)) {
+    if(delivery(&ctx->msg, &ctx->ptr, ctx->inBox, ctx->ygg_id)) {
 
 	    if (recv_chunk(ctx, (char *) &op, sizeof(int))) {
 		    PERROR("recv_chunk failed");
@@ -781,7 +786,7 @@ get_tuple(struct tuple *s, struct context *ctx)
 
     send_to_destination(&ctx->msg);
 
-    if(delivery(&ctx->msg, &ctx->ptr, ctx->inBox)) {
+    if(delivery(&ctx->msg, &ctx->ptr, ctx->inBox, ctx->ygg_id)) {
 
         s = recv_tuple(ctx);
 
@@ -827,7 +832,7 @@ read_tuple(struct tuple *template_tuple, struct context *ctx)
 
     send_to_destination(&ctx->msg);
 
-    if(delivery(&ctx->msg, &ctx->ptr, ctx->inBox)) {
+    if(delivery(&ctx->msg, &ctx->ptr, ctx->inBox, ctx->ygg_id)) {
         returned_tuple = recv_tuple(ctx);
         if (returned_tuple == NULL) {
             PERROR("recv_tuple failed for read");
@@ -873,7 +878,7 @@ get_nb_tuple(struct tuple *template_tuple, struct context *ctx)
 
     send_to_destination(&ctx->msg);
 
-    if(delivery(&ctx->msg, &ctx->ptr, ctx->inBox)) {
+    if(delivery(&ctx->msg, &ctx->ptr, ctx->inBox, ctx->ygg_id)) {
         returned_tuple = recv_tuple(ctx);
         if (returned_tuple == NULL) {
             PERROR("recv_tuple failed for nonblocking get");
@@ -918,7 +923,7 @@ read_nb_tuple(struct tuple *template_tuple, struct context *ctx)
 
     send_to_destination(&ctx->msg);
 
-    if(delivery(&ctx->msg, &ctx->ptr, ctx->inBox)) {
+    if(delivery(&ctx->msg, &ctx->ptr, ctx->inBox, ctx->ygg_id)) {
         received_tuple = recv_tuple(ctx);
         if (received_tuple == NULL) {
             PERROR("recv_tuple failed");

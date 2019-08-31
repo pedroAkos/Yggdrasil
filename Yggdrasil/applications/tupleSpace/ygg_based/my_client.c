@@ -57,6 +57,7 @@ void * resolver_app(void* args) {
         put_tuple(t, &ctx);
         printf("put tuple no more trouble\n");
 
+        destroy_tuple(u);
 
         gettimeofday(&T1, NULL);
         printf("%f\n", TIMEVAL_DIFF(T0, T1));
@@ -82,7 +83,7 @@ main(int argc, char *argv[])
     registerProtocol(PROTO_ROUTING_BATMAN, batman_init, bargs);
     batman_args_destroy(bargs);
 
-    reliable_p2p_args* rargs = reliableP2PArgs_init(10, 2, 5);
+    reliable_p2p_args* rargs = reliableP2PArgs_init(10, 0, 500000000, 5);
     registerProtocol(PROTO_P2P_RELIABLE_DELIVERY, reliable_point2point_init, rargs);
     reliableP2PArgs_destroy(rargs);
 
@@ -147,6 +148,8 @@ main(int argc, char *argv[])
 
         gettimeofday(&T1, NULL);
         printf("%f\n", TIMEVAL_DIFF(T0, T1));
+
+        destroy_tuple(u);
 
         sleep(1);
     }
