@@ -15,11 +15,11 @@ static void* readPayload(void* payload, unsigned short payloadLen, void* ptr, vo
 	if(payload != NULL) {
 		if(ptr == NULL) { //read first element
 			ptr = payload;
-			memcpy(buffer, ptr, toRead);
+			MEMCPY(buffer, ptr, toRead);
 			ptr += toRead;
 			return ptr;
 		} else if((ptr - payload) + toRead <= payloadLen){ //read in the middle
-			memcpy(buffer, ptr, toRead);
+			MEMCPY(buffer, ptr, toRead);
 			ptr += toRead;
 			return ptr;
 		} else
@@ -35,7 +35,7 @@ static void ygg_msg_payload(YggMessage* msg, char* payload, unsigned short lengt
 		msg->data = realloc(msg->data, msg->dataLen + length);
 	}
 
-	memcpy(msg->data+msg->dataLen, payload, length);
+	MEMCPY(msg->data+msg->dataLen, payload, length);
 
 	msg->dataLen += length;
 
@@ -45,7 +45,7 @@ void YggMessage_initIp(YggMessage* msg, short protoID, const char* dest_addr, un
 	msg->header.type = IP;
 	bzero(msg->header.src_addr.ip.addr, 16);
 	bzero(msg->header.dst_addr.ip.addr, 16);
-	memcpy(msg->header.dst_addr.ip.addr, dest_addr, strlen(dest_addr));
+	MEMCPY(msg->header.dst_addr.ip.addr, dest_addr, strlen(dest_addr));
 	msg->header.dst_addr.ip.port = dest_port;
 	msg->Proto_id = protoID;
 	msg->dataLen = 0;
@@ -62,7 +62,7 @@ void YggMessage_initBcast(YggMessage* msg, short protoID) {
 
 void YggMessage_init(YggMessage* msg, unsigned char addr[6], short protoID) {
 	msg->header.type = MAC;
-	memcpy(msg->header.dst_addr.mac_addr.data, addr, WLAN_ADDR_LEN);
+	MEMCPY(msg->header.dst_addr.mac_addr.data, addr, WLAN_ADDR_LEN);
 	msg->Proto_id = protoID;
 	msg->dataLen = 0;
 	msg->data = NULL;
@@ -104,7 +104,7 @@ void YggTimer_init(YggTimer* timer, short protoOrigin, short protoDest) {
 }
 
 void YggTimer_init_with_uuid(YggTimer* timer, uuid_t uuid, short protoOrigin, short protoDest) {
-	memcpy(timer->id, uuid, sizeof(uuid_t));
+	MEMCPY(timer->id, uuid, sizeof(uuid_t));
 	timer->proto_origin = protoOrigin;
 	timer->proto_dest = protoDest;
 	timer->length = 0;
@@ -139,7 +139,7 @@ void YggTimer_setPayload(YggTimer* timer, void* payload, unsigned short payloadL
 
 	timer->payload = malloc(payloadLen);
 
-	memcpy(timer->payload, payload, payloadLen);
+	MEMCPY(timer->payload, payload, payloadLen);
 
 	timer->length = payloadLen;
 }
@@ -151,7 +151,7 @@ void YggTimer_addPayload(YggTimer* timer, void* payload, unsigned short payloadL
 		timer->payload = realloc(timer->payload, timer->length + payloadLen);
 	}
 
-	memcpy(timer->payload+timer->length, payload, payloadLen);
+	MEMCPY(timer->payload+timer->length, payload, payloadLen);
 
 	timer->length += payloadLen;
 }
@@ -183,7 +183,7 @@ void YggEvent_addPayload(YggEvent* ev, void* payload, unsigned short payloadLen)
 		ev->payload = realloc(ev->payload, ev->length + payloadLen);
 	}
 
-	memcpy(ev->payload+ev->length, payload, payloadLen);
+	MEMCPY(ev->payload+ev->length, payload, payloadLen);
 
 	ev->length += payloadLen;
 }
@@ -216,7 +216,7 @@ void YggRequest_addPayload(YggRequest* req, void* payload, unsigned short payloa
 		req->payload = realloc(req->payload, req->length + payloadLen);
 	}
 
-	memcpy(req->payload+req->length, payload, payloadLen);
+	MEMCPY(req->payload+req->length, payload, payloadLen);
 
 	req->length += payloadLen;
 }
@@ -248,24 +248,26 @@ int pushPayload(YggMessage* msg, char* buffer, unsigned short len, short protoID
 
 	void* newdata = malloc(newPayloadSize);
 	void* tmp = newdata;
-	memcpy(tmp, &len, sizeof(unsigned short));
+	MEMCPY(tmp, &len, sizeof(unsigned short));
 	tmp += sizeof(unsigned short);
-	memcpy(tmp, buffer, len);
+	MEMCPY(tmp, buffer, len);
 	tmp += len;
-	memcpy(tmp, &msg->Proto_id, sizeof(unsigned short));
+	MEMCPY(tmp, &msg->Proto_id, sizeof(unsigned short));
 	tmp += sizeof(unsigned short);
-	memcpy(tmp, msg->header.dst_addr.mac_addr.data, WLAN_ADDR_LEN);
+	MEMCPY(tmp, msg->header.dst_addr.mac_addr.data, WLAN_ADDR_LEN);
 	tmp += WLAN_ADDR_LEN;
-	memcpy(tmp, &msg->dataLen, sizeof(unsigned short));
+	MEMCPY(tmp, &msg->dataLen, sizeof(unsigned short));
 	tmp += sizeof(unsigned short);
 
-	memcpy(tmp, msg->data, msg->dataLen);
-	free(msg->data);
+	if(msg->data != NULL && msg->dataLen != 0) {
+        MEMCPY(tmp, msg->data, msg->dataLen);
+        free(msg->data);
+    }
 
 	msg->data = newdata;
 	msg->dataLen = newPayloadSize;
 	msg->Proto_id = protoID;
-	memcpy(msg->header.dst_addr.mac_addr.data, newDest->data, WLAN_ADDR_LEN);
+	MEMCPY(msg->header.dst_addr.mac_addr.data, newDest->data, WLAN_ADDR_LEN);
 
 	return SUCCESS;
 }
@@ -279,23 +281,23 @@ int popPayload(YggMessage* msg, char* buffer, unsigned short readlen) {
 	unsigned short readBytes = 0;
 	void* tmp = msg->data;
 
-	memcpy(&readBytes, tmp, sizeof(unsigned short));
+	MEMCPY(&readBytes, tmp, sizeof(unsigned short));
 	tmp += sizeof(unsigned short);
 
 	if(readBytes > readlen)
 		return -1;
 
-	memcpy(buffer, tmp, readBytes);
+	MEMCPY(buffer, tmp, readBytes);
 	tmp += readBytes;
 
 	msg->dataLen = msg->dataLen - sizeof(unsigned short) - readBytes;
 	if(msg->dataLen > 0) {
-		memcpy(&msg->Proto_id, tmp, sizeof(unsigned short));
+		MEMCPY(&msg->Proto_id, tmp, sizeof(unsigned short));
 		tmp += sizeof(unsigned short);
-		memcpy(msg->header.dst_addr.mac_addr.data, tmp, WLAN_ADDR_LEN);
+		MEMCPY(msg->header.dst_addr.mac_addr.data, tmp, WLAN_ADDR_LEN);
 		tmp += WLAN_ADDR_LEN;
 		unsigned short payloadLen = 0;
-		memcpy(&payloadLen, tmp, sizeof(unsigned short));
+		MEMCPY(&payloadLen, tmp, sizeof(unsigned short));
 		tmp += sizeof(unsigned short);
 		msg->dataLen = msg->dataLen - ((sizeof(unsigned short) * 2) + WLAN_ADDR_LEN);
 #ifdef DEBUG
@@ -306,11 +308,16 @@ int popPayload(YggMessage* msg, char* buffer, unsigned short readlen) {
 			ygg_log("YGGMESSAGE", "WARNING", s);
 		}
 #endif
-		char remainingPayload[payloadLen];
-		memcpy(remainingPayload, tmp, payloadLen);
 
-		msg->data = realloc(msg->data, payloadLen);
-		memcpy(msg->data, remainingPayload, payloadLen);
+		if(payloadLen != 0) {
+            char remainingPayload[payloadLen];
+            MEMCPY(remainingPayload, tmp, payloadLen);
+            msg->data = realloc(msg->data, payloadLen);
+            MEMCPY(msg->data, remainingPayload, payloadLen);
+        } else {
+		    free(msg->data);
+		    msg->data = NULL;
+        }
 		msg->dataLen = payloadLen;
 	}
 
@@ -324,13 +331,13 @@ int pushEmptyPayload(YggMessage* msg, short protoID) {
 		return FAILED;
 
 	void* tmp = malloc(newPayloadSize);
-	memcpy(tmp, &msg->Proto_id, sizeof(unsigned short));
+	MEMCPY(tmp, &msg->Proto_id, sizeof(unsigned short));
 	tmp += sizeof(unsigned short);
 
-	memcpy(tmp, &msg->dataLen, sizeof(unsigned short));
+	MEMCPY(tmp, &msg->dataLen, sizeof(unsigned short));
 	tmp += sizeof(unsigned short);
 
-	memcpy(tmp, msg->data, msg->dataLen);
+	MEMCPY(tmp, msg->data, msg->dataLen);
 	free(msg->data);
 
 	msg->data = tmp;
@@ -346,11 +353,11 @@ int popEmptyPayload(YggMessage* msg) {
 	void* tmp = msg->data;
 
 	if(msg->dataLen > 0) {
-		memcpy(&msg->Proto_id, tmp, sizeof(unsigned short));
+		MEMCPY(&msg->Proto_id, tmp, sizeof(unsigned short));
 		tmp += sizeof(unsigned short);
 
 		unsigned short payloadLen = 0;
-		memcpy(&payloadLen, tmp, sizeof(unsigned short));
+		MEMCPY(&payloadLen, tmp, sizeof(unsigned short));
 		tmp += sizeof(unsigned short);
 		msg->dataLen = msg->dataLen - (sizeof(unsigned short)*2);
 
@@ -363,10 +370,10 @@ int popEmptyPayload(YggMessage* msg) {
 		}
 #endif
 		char remainingPayload[payloadLen];
-		memcpy(remainingPayload, tmp, payloadLen);
+		MEMCPY(remainingPayload, tmp, payloadLen);
 
 		msg->data = realloc(msg->data, payloadLen);
-		memcpy(msg->data, remainingPayload, payloadLen);
+		MEMCPY(msg->data, remainingPayload, payloadLen);
 		msg->dataLen = payloadLen;
 	}
 

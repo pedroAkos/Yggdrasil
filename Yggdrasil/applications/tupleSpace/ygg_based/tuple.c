@@ -297,9 +297,10 @@ make_tuple_internal(char *fmt, va_list ap)
 
 	t = malloc(sizeof(struct tuple));
 	if (t == NULL) {
-		PERROR("malloc failed");
-		EXIT();
-	}
+        PERROR("malloc failed");
+        EXIT();
+    }
+
 	t->num_elts = 0;
 	t->string_space = NULL;
 	for (s = fmt; *s; s++) {
@@ -362,13 +363,14 @@ make_tuple_internal(char *fmt, va_list ap)
  * variable argument list.
  */
 struct tuple *
-make_tuple(char *fmt, ...)
+make_tuple(int hash, char *fmt, ...)
 {
 	struct tuple *t;
 	va_list ap;
 	va_start(ap, fmt);
 	t = make_tuple_internal(fmt, ap);
 	va_end(ap);
+	t->hash = hash;
 	return t;
 }
 
@@ -481,11 +483,19 @@ send_chunk(struct context *ctx, char *buf, int bytes_to_send)
 int
 send_tuple(struct context *ctx, struct tuple *t)
 {
+
+
 	int i, string_length;
 	if (send_chunk(ctx, (char *) &t->num_elts, sizeof(int))) {
 		PERROR("send_chunk failed");
 		return 1;
 	}
+
+    if(send_chunk(ctx, (char*) &t->hash, sizeof(int))) {
+        PERROR("send_chunk failed");
+        return 1;
+    }
+
 	string_length = 0;
 	for (i = 0; i < t->num_elts; i++) {
 		if (t->elements[i].tag == 's') {
@@ -558,7 +568,11 @@ int
 recv_chunk(struct context *ctx, char *buf, int size)
 {
     ctx->ptr = YggMessage_readPayload(&ctx->msg, ctx->ptr, buf, size);
-	return 0; // signal success
+    //printf("read chunk ptr: %p  %p\n", ctx->ptr, ctx->msg.data);
+    if(ctx->ptr == NULL)
+        return 1;
+    else
+	    return 0; // signal success
 }
 
 
@@ -569,7 +583,7 @@ struct tuple *
 recv_tuple(struct context *ctx)
 {
 	struct tuple *s;
-	int i, num_elts, string_length, element_size;
+	int i, num_elts, string_length, element_size, hash;
 
 	if (recv_chunk(ctx, (char *) &num_elts, sizeof(int))) {
 		PERROR("recv_chunk failed");
@@ -583,6 +597,12 @@ recv_tuple(struct context *ctx)
 		return (struct tuple *) -1;
 	}
 
+
+    if(recv_chunk(ctx, (char*) &hash, sizeof(int))) {
+        PERROR("recv_chunk failed");
+        return NULL;
+    }
+
 	if (recv_chunk(ctx, (char *) &string_length, sizeof(int))) {
 		PERROR("recv_chunk failed");
 		return NULL;
@@ -594,11 +614,15 @@ recv_tuple(struct context *ctx)
 		PERROR("malloc failed");
 		EXIT();
 	}
+
+	s->hash = hash;
+
 	s->num_elts = num_elts;
 	s->string_length = string_length;
 
 	element_size = num_elts * sizeof(struct element);
 	s->elements = malloc(element_size);
+
 	if (s->elements == NULL) {
 		PERROR("malloc failed");
 		EXIT();
@@ -651,6 +675,99 @@ recv_tuple(struct context *ctx)
 	return s;
 }
 
+/*
+ * -----------------------------------------------------------
+ */
+
+
+/**
+ * \brief Doubly-linked list of tuples, for efficient insertions and
+ * deletions.
+ */
+struct ttuple
+{
+    struct tuple *tuple;
+    struct ttuple *next;
+    struct ttuple *previous;
+};
+
+/**
+ * Pointer to the first tuple in tuple space. When there is a
+ * GET or READ operation, the search begins with the first tuple.
+ */
+static struct ttuple *first_message = NULL;
+
+/**
+ * Pointer to the last tuple in tuple space. When there is a PUT
+ * operation, the tuple is put at the end of the list.
+ */
+static struct ttuple *last_message = NULL;
+
+
+
+static void store_local(struct tuple* t) {
+    struct ttuple *s;
+    s = (struct ttuple *)malloc(sizeof(struct ttuple));
+    if (s == NULL) {
+        perror("malloc failed");
+        exit(1);
+    }
+    s->tuple = t;
+    s->next = NULL;
+
+    if (last_message == NULL)
+        first_message = s;
+    else
+        last_message->next = s;
+    s->previous = last_message;
+    last_message = s;
+}
+
+/**
+ * (same in  server)
+ * Tuples are kept in a doubly-linked list, so there's a lot of
+ * pointer-hacking here.
+ */
+static void
+remove_message_from_space(struct ttuple *s)
+{
+    if (s->previous == NULL && s->next == NULL) {
+        /* I am the only message */
+        first_message = last_message = NULL;
+    }
+    else if (s->next == NULL) {
+        /* I am the last message */
+        last_message = s->previous;
+        last_message->next = NULL;
+    }
+    else if (s->previous == NULL) {
+        /* I am the first message */
+        first_message = s->next;
+        first_message->previous = NULL;
+    }
+    else {
+        /* I have both a previous and a next */
+        s->previous->next = s->next;
+        s->next->previous = s->previous;
+    }
+}
+
+static struct tuple* has_local(struct tuple* s, int remove) {
+
+    struct ttuple* p;
+    struct tuple* t = NULL;
+    for (p = first_message; p != NULL; p = p->next) {
+        if (tuples_match(p->tuple, s)) {
+            t = p->tuple;
+            if (remove) {
+                remove_message_from_space(p);
+                free(p);
+            }
+            return t;
+        }
+    }
+    return t;
+}
 
 /*
  * ----------------------------------------------------------- 
@@ -662,12 +779,12 @@ recv_tuple(struct context *ctx)
 static int
 open_client_socket(struct context *ctx)
 {
-	struct sockaddr_in addr;
 	static int context_id=1;
 //	int optval=1;
 
 	ctx->id = context_id++;
-	init_msg(&ctx->msg, ctx->peername, ctx->server_ygg_id, ctx->ygg_id);
+	ctx->rid = rand();
+	init_msg(&ctx->msg, ctx->peername, ctx->server_ygg_id, ctx->ygg_id, ctx->rid);
 	ctx->ptr = NULL;
 
 
@@ -697,7 +814,20 @@ put_tuple(struct tuple *s, struct context *ctx)
 
 	send_to_destination(&ctx->msg);
 
-	if(delivery(&ctx->msg, &ctx->ptr, ctx->inBox, ctx->ygg_id)) {
+    while((op = delivery(&ctx->msg, &ctx->ptr, ctx->inBox, ctx->ygg_id, ctx->rid)) == OUT_OF_ORDER) {
+
+        recv_chunk(ctx, (char*) &op, sizeof(int));
+
+        if(op == GET || op == GET_NB) {
+            struct tuple* returned_tuple = recv_tuple(ctx);
+            if (returned_tuple != NULL && returned_tuple != (struct tuple *) -1 ) {
+                store_local(returned_tuple);
+            }
+        }
+
+        YggMessage_freePayload(&ctx->msg);
+    }
+    if(op == OK) {
 
 #if 1 // Why is this? - Bram
         if (recv_chunk(ctx, (char *) &op, sizeof(int))) {
@@ -746,7 +876,20 @@ replace_tuple(struct tuple *template, struct tuple *replacement, struct context 
 
     send_to_destination(&ctx->msg);
 
-    if(delivery(&ctx->msg, &ctx->ptr, ctx->inBox, ctx->ygg_id)) {
+    while((op = delivery(&ctx->msg, &ctx->ptr, ctx->inBox, ctx->ygg_id, ctx->rid)) == OUT_OF_ORDER) {
+
+        recv_chunk(ctx, (char*) &op, sizeof(int));
+
+        if(op == GET || op == GET_NB) {
+            struct tuple* returned_tuple = recv_tuple(ctx);
+            if (returned_tuple != NULL && returned_tuple != (struct tuple *) -1 ) {
+                store_local(returned_tuple);
+            }
+        }
+
+        YggMessage_freePayload(&ctx->msg);
+    }
+    if(op == OK) {
 
 	    if (recv_chunk(ctx, (char *) &op, sizeof(int))) {
 		    PERROR("recv_chunk failed");
@@ -771,6 +914,11 @@ struct tuple *
 get_tuple(struct tuple *s, struct context *ctx)
 {
 	int op = GET;
+    struct tuple *returned_tuple= has_local(s, 1);
+
+    if(returned_tuple != NULL)
+        return returned_tuple;
+
 	if (open_client_socket(ctx)) {
 		PERROR("open_client_socket failed");
 		return NULL;
@@ -786,17 +934,37 @@ get_tuple(struct tuple *s, struct context *ctx)
 
     send_to_destination(&ctx->msg);
 
-    if(delivery(&ctx->msg, &ctx->ptr, ctx->inBox, ctx->ygg_id)) {
+    while((op = delivery(&ctx->msg, &ctx->ptr, ctx->inBox, ctx->ygg_id, ctx->rid)) == OUT_OF_ORDER) {
 
-        s = recv_tuple(ctx);
+        recv_chunk(ctx, (char*) &op, sizeof(int));
 
-        if (s == NULL) {
-            PERROR("recv_tuple failed");
-            return NULL;
+        if(op == GET || op == GET_NB) {
+            returned_tuple = recv_tuple(ctx);
+            if (returned_tuple != NULL && returned_tuple != (struct tuple *) -1 ) {
+                store_local(returned_tuple);
+            }
         }
-        if (s == (struct tuple *) -1) {
-            PERROR("recv_tuple failed");
-            return NULL;
+
+        YggMessage_freePayload(&ctx->msg);
+    }
+    if(op == OK) {
+
+        recv_chunk(ctx, (char*) &op, sizeof(int));
+
+        if(op == GET) {
+            s = recv_tuple(ctx);
+
+            if (s == NULL) {
+                PERROR("recv_tuple failed");
+                return NULL;
+            }
+            if (s == (struct tuple *) -1) {
+                PERROR("recv_tuple failed");
+                return NULL;
+            }
+        } else {
+            PERROR("recv wrong operation");
+            s = NULL;
         }
 
     } else
@@ -815,8 +983,13 @@ get_tuple(struct tuple *s, struct context *ctx)
 struct tuple *
 read_tuple(struct tuple *template_tuple, struct context *ctx)
 {
+
 	int op = READ;
-        struct tuple *returned_tuple=0;
+	struct tuple *returned_tuple= has_local(template_tuple, 0);
+
+	if(returned_tuple != NULL)
+	    return returned_tuple;
+
 	if (open_client_socket(ctx)) {
 		PERROR("open_client_socket failed");
 		return NULL;
@@ -832,21 +1005,43 @@ read_tuple(struct tuple *template_tuple, struct context *ctx)
 
     send_to_destination(&ctx->msg);
 
-    if(delivery(&ctx->msg, &ctx->ptr, ctx->inBox, ctx->ygg_id)) {
-        returned_tuple = recv_tuple(ctx);
-        if (returned_tuple == NULL) {
-            PERROR("recv_tuple failed for read");
-            print_tuple_stderr(template_tuple);
-            fprintf(stderr, " was the template.\n");
-            return NULL;
+    while((op = delivery(&ctx->msg, &ctx->ptr, ctx->inBox, ctx->ygg_id, ctx->rid)) == OUT_OF_ORDER) {
+
+        recv_chunk(ctx, (char*) &op, sizeof(int));
+
+        if(op == GET || op == GET_NB) {
+            returned_tuple = recv_tuple(ctx);
+            if (returned_tuple != NULL && returned_tuple != (struct tuple *) -1 ) {
+                store_local(returned_tuple);
+            }
         }
-        if (returned_tuple == (struct tuple *) -1) {
-            PERROR("recv_tuple failed for read");
-            print_tuple_stderr(template_tuple);
-            fprintf(stderr, " was the template.\n");
-            return NULL;
-        }
+
+        YggMessage_freePayload(&ctx->msg);
     }
+    if(op == OK) {
+        recv_chunk(ctx, (char*) &op, sizeof(int));
+
+        if(op == READ) {
+            returned_tuple = recv_tuple(ctx);
+            if (returned_tuple == NULL) {
+                PERROR("recv_tuple failed for read");
+                print_tuple_stderr(template_tuple);
+                fprintf(stderr, " was the template.\n");
+                return NULL;
+            }
+            if (returned_tuple == (struct tuple *) -1) {
+                PERROR("recv_tuple failed for read");
+                print_tuple_stderr(template_tuple);
+                fprintf(stderr, " was the template.\n");
+                return NULL;
+            }
+        }else {
+            PERROR("recveid wrong operation");
+            returned_tuple = NULL;
+        }
+    }else
+        returned_tuple = NULL;
+
     ctx->id=0;
     ctx->ptr = NULL;
     YggMessage_freePayload(&ctx->msg);
@@ -862,7 +1057,11 @@ struct tuple *
 get_nb_tuple(struct tuple *template_tuple, struct context *ctx)
 {
 	int op = GET_NB;
-	struct tuple *returned_tuple = 0;
+    struct tuple *returned_tuple= has_local(template_tuple, 1);
+
+    if(returned_tuple != NULL)
+        return returned_tuple;
+
 	if (open_client_socket(ctx)) {
 		PERROR("open_client_socket failed");
 		return (struct tuple *) -1;
@@ -878,20 +1077,44 @@ get_nb_tuple(struct tuple *template_tuple, struct context *ctx)
 
     send_to_destination(&ctx->msg);
 
-    if(delivery(&ctx->msg, &ctx->ptr, ctx->inBox, ctx->ygg_id)) {
-        returned_tuple = recv_tuple(ctx);
-        if (returned_tuple == NULL) {
-            PERROR("recv_tuple failed for nonblocking get");
-            print_tuple_stderr(template_tuple);
-            fprintf(stderr, " was the template.\n");
-            return (struct tuple *) -1;
+    while((op = delivery(&ctx->msg, &ctx->ptr, ctx->inBox, ctx->ygg_id, ctx->rid)) == OUT_OF_ORDER) {
+
+        recv_chunk(ctx, (char*) &op, sizeof(int));
+
+        if(op == GET || op == GET_NB) {
+            returned_tuple = recv_tuple(ctx);
+            if (returned_tuple != NULL && returned_tuple != (struct tuple *) -1 ) {
+                store_local(returned_tuple);
+            }
         }
-        if (returned_tuple == (struct tuple *) -1) {
-            ctx->id=0;
-            ctx->ptr = NULL;
-            YggMessage_freePayload(&ctx->msg);
-            return NULL;
+
+        YggMessage_freePayload(&ctx->msg);
+    }
+    if(op == OK) {
+
+        recv_chunk(ctx, (char*) &op, sizeof(int));
+
+        if(op == GET_NB) {
+            returned_tuple = recv_tuple(ctx);
+            if (returned_tuple == NULL) {
+                PERROR("recv_tuple failed for nonblocking get");
+                print_tuple_stderr(template_tuple);
+                fprintf(stderr, " was the template.\n");
+                return (struct tuple *) -1;
+            }
+            if (returned_tuple == (struct tuple *) -1) {
+                ctx->id = 0;
+                ctx->ptr = NULL;
+                YggMessage_freePayload(&ctx->msg);
+                return NULL;
+            }
+        }else {
+            PERROR("recveid wrong operation");
+            returned_tuple = NULL;
         }
+
+    } else {
+        returned_tuple = NULL;
     }
     ctx->id=0;
     ctx->ptr = NULL;
@@ -907,7 +1130,11 @@ struct tuple *
 read_nb_tuple(struct tuple *template_tuple, struct context *ctx)
 {
 	int op = READ_NB;
-	struct tuple *received_tuple=0;
+    struct tuple *returned_tuple= has_local(template_tuple, 0);
+
+    if(returned_tuple != NULL)
+        return returned_tuple;
+
 	if (open_client_socket(ctx)) {
 		PERROR("open_client_socket failed");
 		return (struct tuple *) -1;
@@ -923,23 +1150,46 @@ read_nb_tuple(struct tuple *template_tuple, struct context *ctx)
 
     send_to_destination(&ctx->msg);
 
-    if(delivery(&ctx->msg, &ctx->ptr, ctx->inBox, ctx->ygg_id)) {
-        received_tuple = recv_tuple(ctx);
-        if (received_tuple == NULL) {
-            PERROR("recv_tuple failed");
-            return (struct tuple *) -1;
+    while((op = delivery(&ctx->msg, &ctx->ptr, ctx->inBox, ctx->ygg_id, ctx->rid)) == OUT_OF_ORDER) {
+
+        recv_chunk(ctx, (char*) &op, sizeof(int));
+
+        if(op == GET || op == GET_NB) {
+            returned_tuple = recv_tuple(ctx);
+            if (returned_tuple != NULL && returned_tuple != (struct tuple *) -1 ) {
+                store_local(returned_tuple);
+            }
         }
-        if (received_tuple == (struct tuple *) -1) {
-            ctx->id=0;
-            ctx->ptr = NULL;
-            YggMessage_freePayload(&ctx->msg);
-            return NULL;
+
+        YggMessage_freePayload(&ctx->msg);
+    }
+    if(op == OK) {
+
+        recv_chunk(ctx, (char*) &op, sizeof(int));
+
+        if(op == READ_NB) {
+            returned_tuple = recv_tuple(ctx);
+            if (returned_tuple == NULL) {
+                PERROR("recv_tuple failed");
+                return (struct tuple *) -1;
+            }
+            if (returned_tuple == (struct tuple *) -1) {
+                ctx->id = 0;
+                ctx->ptr = NULL;
+                YggMessage_freePayload(&ctx->msg);
+                return NULL;
+            }
+        } else {
+            PERROR("recveid wrong operation");
+            returned_tuple = NULL;
         }
+    } else {
+        returned_tuple = NULL;
     }
     ctx->id=0;
     ctx->ptr = NULL;
     YggMessage_freePayload(&ctx->msg);
-	return received_tuple;
+	return returned_tuple;
 }
 
 

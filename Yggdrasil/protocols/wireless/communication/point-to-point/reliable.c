@@ -65,7 +65,8 @@ typedef struct _reliable_state{
 }p2p_reliable_state;
 
 static void* serialize_meta_info(meta_info* info){
-	void* buffer = malloc(sizeof(meta_info));
+    int buf_len = sizeof(unsigned long) + sizeof(unsigned short);
+	void* buffer = malloc(buf_len);
 
 	memcpy(buffer, &info->sqn, sizeof(unsigned long));
 	memcpy(buffer + sizeof(unsigned long), &info->type, sizeof(unsigned short));
@@ -131,6 +132,8 @@ static short store_inbond(unsigned long recv_sqn, YggMessage* msg, p2p_reliable_
 		m->msg = NULL;
 		clock_gettime(CLOCK_MONOTONIC, &m->time);
 		list_add_item_to_tail(dest->msg_list, m);
+		if(dest->msg_list->size == 1)
+		    dest->first = m->time;
 	}
 
 	return OK;
@@ -158,25 +161,29 @@ static short rm_outbond(unsigned long ack_sqn, WLANAddr* addr, p2p_reliable_stat
 }
 
 static short rm_inbond(p2p_reliable_state* state){
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
 	list_item* it = state->inbound_msgs->head;
 	while(it != NULL){
 		destination* dest = it->data;
-		if(dest->first.tv_sec != 0 &&  dest->first.tv_sec + state->ttl <  time(NULL)){
+		if(dest->first.tv_sec != 0 &&  dest->first.tv_sec + state->ttl <  now.tv_sec){
 			list_item* it2 = dest->msg_list->head;
 			while(it2 != NULL) {
 				pending_msg* m = it2->data;
-				if(m->time.tv_sec + state->ttl < time(NULL)){
+				if(m->time.tv_sec + state->ttl < now.tv_sec){
 					pending_msg* torm = list_remove_head(dest->msg_list);
 					if(dest->msg_list->head != NULL) {
-						m = dest->msg_list->head->data;
+					    it2 = dest->msg_list->head;
+						m = it2->data;
 						dest->first = m->time;
 					}
 					else{
+					    it2 = NULL;
 						dest->first.tv_sec = 0;
 					}
 
-					//YggMessage_freePayload(torm->msg);
-					//free(torm->msg);
+//					char str[33]; bzero(str, 33); wlan2asc(&dest->destination, str);
+//					printf("Freed in msg %d from %s\n", torm->sqn, str);
 					free(torm);
 				} else
 					break;
@@ -196,9 +203,10 @@ static void prepareAck(YggMessage* msg, unsigned long recv_sqn, WLANAddr* dest, 
 	info.sqn = recv_sqn;
 	info.type = ACK;
 
+	int buf_len = sizeof(unsigned long) + sizeof(unsigned short);
 	void* buffer = serialize_meta_info(&info);
 
-	pushPayload(msg, (char *) buffer, sizeof(meta_info), state->proto_id, dest);
+	pushPayload(msg, (char *) buffer, buf_len, state->proto_id, dest);
 
 	free(buffer);
 }
@@ -206,8 +214,9 @@ static void prepareAck(YggMessage* msg, unsigned long recv_sqn, WLANAddr* dest, 
 
 static void notify_failed_delivery(YggMessage* msg, p2p_reliable_state* state){
 
-	void* buffer = malloc(sizeof(meta_info));
-	popPayload(msg, (char *) buffer, sizeof(meta_info));
+    int buf_len = sizeof(unsigned long) + sizeof(unsigned short);
+	void* buffer = malloc(buf_len);
+	popPayload(msg, (char *) buffer, buf_len);
 	free(buffer);
 
 	YggEvent ev;
@@ -241,6 +250,7 @@ static void * reliable_point2point_main_loop(main_loop_args* args){
 
 		if(elem.type == YGG_MESSAGE) {
 
+		    bool free_msg = false;
 			if(elem.data.msg.Proto_id != state->proto_id){
 				//message from some protocol
 				if(memcmp(elem.data.msg.header.dst_addr.mac_addr.data, state->bcastAddr.data, WLAN_ADDR_LEN) != 0){
@@ -249,11 +259,12 @@ static void * reliable_point2point_main_loop(main_loop_args* args){
 					info.sqn = state->sqn;
 					info.type = MSG;
 
-					void* buffer = malloc(sizeof(meta_info));
+                    int buf_len = sizeof(unsigned long) + sizeof(unsigned short);
+					void* buffer = malloc(buf_len);
 					memcpy(buffer, &info.sqn, sizeof(unsigned long));
 					memcpy(buffer + sizeof(unsigned long), &info.type, sizeof(unsigned short));
 
-					pushPayload(&elem.data.msg,(char *) buffer, sizeof(meta_info), state->proto_id, &elem.data.msg.header.dst_addr.mac_addr);
+					pushPayload(&elem.data.msg,(char *) buffer, buf_len, state->proto_id, &elem.data.msg.header.dst_addr.mac_addr);
 
 					store_outbond(&elem.data.msg, state);
 
@@ -264,16 +275,20 @@ static void * reliable_point2point_main_loop(main_loop_args* args){
 
 					free(buffer);
 
+				} else {
+				    free_msg = true;
 				}
 
 				queue_push(state->dispatcher_queue, &elem);
 
 			}else{
 				//message from the network
+                free_msg = true;
 
-				void* buffer = malloc(sizeof(meta_info));
+				int buf_len = sizeof(unsigned long) + sizeof(unsigned short);
+				void* buffer = malloc(buf_len);
 
-				popPayload(&elem.data.msg, (char *) buffer, sizeof(meta_info));
+				popPayload(&elem.data.msg, (char *) buffer, buf_len);
 
 				meta_info info;
 
@@ -307,6 +322,8 @@ static void * reliable_point2point_main_loop(main_loop_args* args){
                         ygg_log("RELIABLE POINT2POINT", "LOG", log);
 					}
 
+					free_elem_payload(&elem);
+
 					prepareAck(&elem.data.msg, info.sqn, &elem.data.msg.header.src_addr.mac_addr, state);
 
 					queue_push(state->dispatcher_queue, &elem);
@@ -315,6 +332,8 @@ static void * reliable_point2point_main_loop(main_loop_args* args){
 				}
 
 			}
+			if(free_msg)
+                YggMessage_freePayload(&elem.data.msg);
 
 		}else if(elem.type == YGG_TIMER) {
 
@@ -342,7 +361,7 @@ static void * reliable_point2point_main_loop(main_loop_args* args){
 						}
 
 						notify_failed_delivery(m->msg, state);
-						YggMessage_freePayload(m->msg);
+						//YggMessage_freePayload(m->msg);
 						free(m->msg);
 						free(m);
 					}else if( expired(&m->time, state) ){
@@ -356,8 +375,11 @@ static void * reliable_point2point_main_loop(main_loop_args* args){
 
 						queue_push(state->dispatcher_queue, &elem);
 
-						m->resend ++;
 						clock_gettime(CLOCK_MONOTONIC, &m->time);
+
+						unsigned long backoff = state->time_to_resend_ns / (state->threshold+1 -m->resend);
+                        setNanoTime(&m->time ,backoff);
+                        m->resend ++;
 
 						prev = it2;
 						it2 = it2->next;
@@ -449,6 +471,7 @@ reliable_p2p_args* reliableP2PArgs_init(unsigned short ttl, unsigned short time_
     args->time_to_resend_s = time_to_resend_s;
     args->time_to_resend_ns = time_to_resend_ns;
     args->threshold = threshold;
+    return args;
 }
 
 void reliableP2PArgs_destroy(reliable_p2p_args* args) {

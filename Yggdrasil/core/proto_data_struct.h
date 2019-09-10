@@ -21,6 +21,23 @@
 #define YGG_MESSAGE_PAYLOAD MAX_PAYLOAD -sizeof(short) -sizeof(unsigned int) //Proto_id will be serialized into phy message payload (message id)
 #endif
 
+#ifdef MEM_DEBUG
+static inline void *
+mymemcpy(void* x, void* y, int size, char* file, int line) {
+    if(x== NULL)  {
+        fprintf(stderr, "destination is NULL at %s:%d\n", file, line);
+    }
+    if(y == NULL) {
+        fprintf(stderr, "source is NULL at %s:%d\n", file, line);
+    }
+
+    return memcpy(x, y, size);
+}
+
+#define MEMCPY(x,y,len) mymemcpy(x,y,len, __FILE__, __LINE__)
+#else
+#define MEMCPY(x,y,len) memcpy(x,y,len)
+#endif
 
 #ifndef WIRELESS_NETWORKS
 #define YGG_MESSAGE_PAYLOAD 1500 //not-used if no wireless

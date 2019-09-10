@@ -364,13 +364,14 @@ make_tuple_internal(char *fmt, va_list ap)
  * variable argument list.
  */
 struct tuple *
-make_tuple(char *fmt, ...)
+make_tuple(int hash, char *fmt, ...)
 {
 	struct tuple *t;
 	va_list ap;
 	va_start(ap, fmt);
 	t = make_tuple_internal(fmt, ap);
 	va_end(ap);
+	t->hash = hash;
 	return t;
 }
 
@@ -501,11 +502,18 @@ send_chunk(struct context *ctx, char *buf, int bytes_to_send)
 int
 send_tuple(struct context *ctx, struct tuple *t)
 {
+
 	int i, string_length;
 	if (send_chunk(ctx, (char *) &t->num_elts, sizeof(int))) {
 		PERROR("send_chunk failed");
 		return 1;
 	}
+
+    if (send_chunk(ctx, (char *) &t->hash, sizeof(int))) {
+        PERROR("send_chunk failed");
+        return 1;
+    }
+
 	string_length = 0;
 	for (i = 0; i < t->num_elts; i++) {
 		if (t->elements[i].tag == 's') {
@@ -627,7 +635,8 @@ struct tuple *
 recv_tuple(struct context *ctx)
 {
 	struct tuple *s;
-	int i, num_elts, string_length, element_size;
+	int i, num_elts, string_length, element_size, hash;
+
 
 	if (recv_chunk(ctx, (char *) &num_elts, sizeof(int))) {
 		PERROR("recv_chunk failed");
@@ -641,6 +650,11 @@ recv_tuple(struct context *ctx)
 		return (struct tuple *) -1;
 	}
 
+    if (recv_chunk(ctx, (char *) &hash, sizeof(int))) {
+        PERROR("recv_chunk failed");
+        return NULL;
+    }
+
 	if (recv_chunk(ctx, (char *) &string_length, sizeof(int))) {
 		PERROR("recv_chunk failed");
 		return NULL;
@@ -652,6 +666,7 @@ recv_tuple(struct context *ctx)
 		PERROR("malloc failed");
 		EXIT();
 	}
+	s->hash = hash;
 	s->num_elts = num_elts;
 	s->string_length = string_length;
 

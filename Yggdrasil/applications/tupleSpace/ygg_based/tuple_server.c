@@ -161,7 +161,7 @@ static struct ttuple *last_message = NULL;
 
 
 
-#define MAXNUMTHREADS 16
+#define MAXNUMTHREADS 64
 
 /**
  * Maintain a list of the clients currently trying to access tuple
@@ -204,26 +204,27 @@ static pthread_cond_t  blocked_cond;
 #endif
 
 
-static void print_status(void)
-{
-  int i;
-  static char lastprint[MAXNUMTHREADS+1];
-
-  if (!strcmp(lastprint, status_list)) return;
-  strcpy(lastprint, status_list);
-  fprintf(stderr,status_list);
-  for (i=0; i<MAXNUMTHREADS; i++)
-    fputc(8,stderr);
-  fflush(stderr);
-}
+//static void print_status(void)
+//{
+//  int i;
+//  static char lastprint[MAXNUMTHREADS+1];
+//
+//  if (!strcmp(lastprint, status_list)) return;
+//  strcpy(lastprint, status_list);
+//  fprintf(stderr,status_list);
+//  for (i=0; i<MAXNUMTHREADS; i++)
+//    fputc(8,stderr);
+//  fflush(stderr);
+//}
 
 
 static void print_thread_func(void *varg)
 {
   while (1)
   {
-    print_status();
-    usleep(1000);
+    //print_status();
+    usleep(10000);
+    fflush(stdout);
   }
 }
 
@@ -329,7 +330,7 @@ kill_this_thread(struct context *arg)
  */
 static void
 handle_get_read(struct context *ctx,
-		struct tuple *s, int remove, int blocking)
+		struct tuple *s, int remove, int blocking, int op)
 {
 	struct ttuple *p;
 	int clientnr = ctx - client_list;
@@ -359,8 +360,9 @@ handle_get_read(struct context *ctx,
 				LOGTUPLE_LOCAL(p->tuple, buff);
 				printf("%s(%d) %s a tuple: %s\n", ctx->peername, ctx->id, (remove)?"gets":"reads", buff);
 
-				WLANAddr dest = ctx->msg.header.src_addr.mac_addr;
-				init_msg(&ctx->msg, ctx->peername, ctx->msg.Proto_id, ctx->server_ygg_id);
+				//WLANAddr dest = ctx->msg.header.src_addr.mac_addr;
+				init_msg(&ctx->msg, ctx->peername, ctx->msg.Proto_id, ctx->server_ygg_id, ctx->rid);
+				send_chunk(ctx, (char*) &op, sizeof(int));
 
 				if (send_tuple(ctx, p->tuple)) {
 					PRINTF("send_tuple failed\n");
@@ -374,17 +376,19 @@ handle_get_read(struct context *ctx,
 					DBGPRINTF("remove=%d\n", remove);
 					if (remove) {
 						add_tuple_to_space(p->tuple);
+						free(p);
 						destroy_tuple(s);
 						return;
 					}
 
 				}
 
-                ctx->msg.header.dst_addr.mac_addr = dest;
+                //ctx->msg.header.dst_addr.mac_addr = dest;
                 send_to_destination(&ctx->msg);
 
 				if (remove) {
 					destroy_tuple(p->tuple);
+					free(p);
 				}
 				destroy_tuple(s);
 				return;
@@ -420,6 +424,8 @@ handle_get_read(struct context *ctx,
 		else {
 			/* don't wait, return a failure code */
 
+            init_msg(&ctx->msg, ctx->peername, ctx->msg.Proto_id, ctx->server_ygg_id, ctx->rid);
+            send_chunk(ctx, (char*) &op, sizeof(int));
 			int ack = -1;
 			if (send_chunk(ctx, (char *) &ack, sizeof(int)))
 			{
@@ -470,8 +476,10 @@ handle_replace(struct context *ctx, struct tuple *template, struct tuple *replac
 	add_tuple_to_space(replacement);
 
 	/* send an ack, not sure if this is really req'd? */
-    YggMessage_addPayload(&ctx->msg, &operation, sizeof(int));
-    ctx->msg.header.dst_addr.mac_addr = ctx->msg.header.src_addr.mac_addr;
+    //WLANAddr dest = ctx->msg.header.src_addr.mac_addr;
+    init_msg(&ctx->msg, ctx->peername, ctx->msg.Proto_id, ctx->server_ygg_id, ctx->rid);
+    send_chunk(ctx, (char*) &operation, sizeof(int));
+    //ctx->msg.header.dst_addr.mac_addr = dest;
     send_to_destination(&ctx->msg);
 
 	destroy_tuple(template);
@@ -571,7 +579,9 @@ client_thread_func(void *varg)
 	struct tuple *s, *t;
 	unsigned int operation;
 
-	printf("Received conn %s %d\n", ctx->peername, ctx->msg.Proto_id);
+	//printf("Received conn %s %d  %p  %p\n", ctx->peername, ctx->msg.Proto_id, ctx->ptr, ctx->msg.data);
+    printf("Received conn %s %d %d\n", ctx->peername, ctx->msg.Proto_id, ctx->rid);
+
 
 #if 0
 	int optval=1;
@@ -614,13 +624,29 @@ client_thread_func(void *varg)
 #endif
 		char buff[100];
         LOGTUPLE_LOCAL(s, buff);
-        printf("%s(%d) puts a tuple: %s\n", ctx->peername, ctx->id, buff);
-		add_tuple_to_space(s);
+        struct ttuple *p;
+        int dup = 0;
+        GETACCESS;
+        for (p = first_message; p != NULL; p = p->next) {
+            if(p->tuple->hash == s->hash) {
+                dup = 1;
+                break;
+            }
+        }
+        YIELDACCESS
+        if(dup) {
+            printf("%s(%d) dups a tuple: %s\n", ctx->peername, ctx->id, buff);
+        } else {
+            printf("%s(%d) puts a tuple: %s\n", ctx->peername, ctx->id, buff);
+            add_tuple_to_space(s);
+        }
 		// Why is this??? - Bram
 		/* send an ack */
 		YggMessage_freePayload(&ctx->msg);
-		YggMessage_addPayload(&ctx->msg, &operation, sizeof(int));
-		ctx->msg.header.dst_addr.mac_addr = ctx->msg.header.src_addr.mac_addr;
+		//WLANAddr dest = ctx->msg.header.src_addr.mac_addr;
+		init_msg(&ctx->msg, ctx->peername, ctx->msg.Proto_id, ctx->server_ygg_id, ctx->rid);
+		send_chunk(ctx, (char*) &operation, sizeof(int));
+		//ctx->msg.header.dst_addr.mac_addr = dest;
 		send_to_destination(&ctx->msg);
 
 		// advise peer that we stop sending
@@ -641,7 +667,7 @@ client_thread_func(void *varg)
 //		LOGTUPLE(s);
 //		YIELDLOG;
         YggMessage_freePayload(&ctx->msg);
-		handle_get_read(ctx, s, 1, 1);
+		handle_get_read(ctx, s, 1, 1, operation);
 		// advise peer that we stop sending
 
 	}
@@ -660,7 +686,7 @@ client_thread_func(void *varg)
 //		LOGTUPLE(s);
 //		YIELDLOG;
         YggMessage_freePayload(&ctx->msg);
-		handle_get_read(ctx, s, 0, 1);
+		handle_get_read(ctx, s, 0, 1, operation);
 		// advise peer that we stop sending
 
 	}
@@ -679,7 +705,7 @@ client_thread_func(void *varg)
 //		LOGTUPLE(s);
 //		YIELDLOG;
         YggMessage_freePayload(&ctx->msg);
-		handle_get_read(ctx, s, 1, 0);
+		handle_get_read(ctx, s, 1, 0, operation);
 	}
 	else if (operation == READ_NB) {
 		status_list[clientnr]='r';
@@ -696,7 +722,7 @@ client_thread_func(void *varg)
 //		LOGTUPLE(s);
 //		YIELDLOG;
         YggMessage_freePayload(&ctx->msg);
-		handle_get_read(ctx, s, 0, 0);
+		handle_get_read(ctx, s, 0, 0, operation);
 	}
 	else if (operation == REPLACE) {
 		status_list[clientnr]='r';
@@ -798,7 +824,7 @@ main(int argc, char *argv[])
 #endif
 
 	pthread_t printthread_id;
-	if (getenv("LINUXTUPLES_STATUS"))
+	//if (getenv("LINUXTUPLES_STATUS"))
 		pthread_create(&printthread_id, 0, (threadfunction) print_thread_func, 0);
 
 
@@ -810,7 +836,7 @@ main(int argc, char *argv[])
     registerProtocol(PROTO_ROUTING_BATMAN, batman_init, bargs);
     batman_args_destroy(bargs);
 
-    reliable_p2p_args* rargs = reliableP2PArgs_init(10, 0, 500000000, 5);
+    reliable_p2p_args* rargs = reliableP2PArgs_init(30, 0, 500000000, 10);
     registerProtocol(PROTO_P2P_RELIABLE_DELIVERY, reliable_point2point_init, rargs);
     reliableP2PArgs_destroy(rargs);
 
@@ -831,26 +857,50 @@ main(int argc, char *argv[])
 		static int searchidx=0;
 		ctx.id = context_id++;
 
-        wait_delivery(&ctx.msg, &ctx.ptr, ctx.inBox);
+        wait_delivery(&ctx.msg, &ctx.rid, &ctx.ptr, ctx.inBox);
 		while(1) {
-            if (client_list[searchidx].thr == -1) {
-                client_list[searchidx] = ctx;
 
-                wlan2asc(&ctx.msg.header.src_addr.mac_addr, client_list[searchidx].peername);
-
-                if (pthread_create(&client_list[searchidx].thr,
-                                   &threadattrs,
-                                   client_thread_func,
-                                   &client_list[searchidx])
-                    != 0) {
-                    perror("pthread_create");
-                    fprintf(stderr, "Threads are hosed\n");
-                    EXIT();
+            if (ctx.msg.Proto_id == 500) {
+                int op;
+                recv_chunk(&ctx, (char*) &op, sizeof(int));
+                if(op == GET || op == GET_NB) {
+                    struct tuple* s = recv_tuple(&ctx);
+                    if(s != (struct tuple*) -1) {
+                        if(s == NULL) {
+                          PERROR("Lost message has a NULL tuple...");
+                        } else {
+                            char buff[100];
+                            LOGTUPLE_LOCAL(s, buff);
+                            printf("server puts a tuple: %s\n", buff);
+                            add_tuple_to_space(s);
+                        }
+                    }
                 }
-                searchidx = (searchidx + 1) % MAXNUMTHREADS;
+                YggMessage_freePayload(&ctx.msg);
                 break;
-            } else
-                searchidx = (searchidx + 1) % MAXNUMTHREADS;
+
+            } else {
+                if (client_list[searchidx].thr == -1) {
+                    client_list[searchidx] = ctx;
+                    //printf("Assinging thread: %p  %p\n", client_list[searchidx].ptr, client_list[searchidx].msg.data);
+//                if(client_list[searchidx].ptr - (void*)client_list[searchidx].msg.data != 2)
+//                    printf("memory corruption!\n");
+                    wlan2asc(&ctx.msg.header.src_addr.mac_addr, client_list[searchidx].peername);
+
+                    if (pthread_create(&client_list[searchidx].thr,
+                                       &threadattrs,
+                                       client_thread_func,
+                                       &client_list[searchidx])
+                        != 0) {
+                        perror("pthread_create");
+                        fprintf(stderr, "Threads are hosed\n");
+                        EXIT();
+                    }
+                    searchidx = (searchidx + 1) % MAXNUMTHREADS;
+                    break;
+                } else
+                    searchidx = (searchidx + 1) % MAXNUMTHREADS;
+            }
         }
 	}
 

@@ -18,6 +18,43 @@
 
 #include "tuple.h"
 
+#include <wordexp.h>
+#include <signal.h>
+
+#include "utils/hashfunctions.h"
+#include "utils/list.h"
+
+void destroyBatman() {
+    system("sudo killall -9 batmand");
+}
+
+
+int init_batman(void) {
+
+    sleep(60);
+    int batman_pid;
+    wordexp_t words;
+//	char cmd[100];
+//	bzero(cmd, 100);
+//	sprintf(cmd, "batmand -o 2000 wlan0", my_number);
+    int r = wordexp("batmand -o 2000 wlan0", &words, 0);
+
+    if(r == 0) {
+        sleep(10);
+        if((batman_pid = fork()) == 0) {
+            int ret = execvp(words.we_wordv[0], words.we_wordv);
+            fprintf(stderr, "Error executing execvp for executable: batmand. Error code: %d\n", ret);
+            exit(1);
+        }
+        wordfree(&words);
+    } else {
+        perror("words failed");
+        exit(1);
+    }
+
+    printf("batman: %d\n", batman_pid);
+    return batman_pid;
+}
 
 char* getHostname() {
     char* hostname;
@@ -63,6 +100,44 @@ char* getHostname() {
     return hostname;
 }
 
+struct timeval BEGIN;
+
+char self[10];
+
+void log_bytes(const char* msg) {
+
+    struct timeval now;
+
+    char buff[50];
+
+    FILE* tx= fopen("/sys/class/net/wlan0/statistics/tx_bytes","r");
+    FILE* rx= fopen("/sys/class/net/wlan0/statistics/rx_bytes","r");
+    gettimeofday(&now, NULL);
+    bzero(buff, 50); fscanf(tx, "%s", buff); printf("%s %s TX-BYTES %s  %f\n", self, msg, buff, TIMEVAL_DIFF(BEGIN, now));
+    bzero(buff, 50); fscanf(rx, "%s", buff); printf("%s %s RX-BYTES %s  %f\n", self, msg, buff, TIMEVAL_DIFF(BEGIN, now));
+    fclose(tx); fclose(rx);
+
+}
+
+void* control_func(void) {
+
+    while (1) {
+        if (access("control.file", F_OK) != -1) {
+            break;
+        } else {
+            // file doesn't exist
+        }
+        sleep(60);
+    }
+
+    remove("control.file");
+    fflush(stdout);
+    sleep(120);
+    destroyBatman();
+    log_bytes("EXIT");
+    exit(1);
+}
+
 void print_tuple_local(struct tuple* t, char* buff) {
     bzero(buff, 100);
 
@@ -97,122 +172,152 @@ void print_tuple_local(struct tuple* t, char* buff) {
 
 #define LOGTUPLE(s, buff)    print_tuple_local(s, buff);
 
-pthread_mutex_t mutex;
+
+pthread_mutex_t mutex_put;
+pthread_mutex_t mutex_get;
+
+int counter_put = 0;
+int counter_get = 0;
+
+int stop = 0;
+
+void inc_get() {
+    pthread_mutex_lock(&mutex_get);
+    counter_get ++;
+    pthread_mutex_unlock(&mutex_get);
+}
+
+void inc_put() {
+    pthread_mutex_lock(&mutex_put);
+    counter_put ++;
+    pthread_mutex_unlock(&mutex_put);
+}
+
+void* counter_fun(void) {
+
+    struct timeval START, T0;
+    gettimeofday(&START, NULL);
+    while(!stop) {
+        sleep(10);
+        pthread_mutex_lock(&mutex_put);
+        pthread_mutex_lock(&mutex_get);
+        gettimeofday(&T0, NULL);
+        printf("%s App-PUT  %d  %f\n", self, counter_put, TIMEVAL_DIFF(START, T0));
+        printf("%s App-GET  %d  %f\n", self, counter_get, TIMEVAL_DIFF(START, T0));
+        counter_put = 0;
+        counter_get = 0;
+        pthread_mutex_unlock(&mutex_get);
+        pthread_mutex_unlock(&mutex_put);
+    }
+
+    printf("%s App-PUT  %d  %f\n", self, counter_put, TIMEVAL_DIFF(START, T0));
+    printf("%s App-GET  %d  %f\n", self, counter_get, TIMEVAL_DIFF(START, T0));
+
+    pthread_exit(NULL);
+
+}
+
+
+list *op_puts, *op_gets;
+
+struct remaining_op {
+    struct tuple* t;
+    int i;
+    int j;
+    int r;
+};
+
+void store_op(list* op_list, struct tuple* t, int i, int j, int r) {
+    struct remaining_op* op = malloc(sizeof(struct remaining_op));
+
+    op->t = t;
+    op->i = i;
+    op->j = j;
+    op->r = r;
+
+    list_add_item_to_tail(op_list, op);
+}
 
 void * resolver_app(void* args) {
 
-    struct tuple *s, *t, *u;
+    pthread_mutex_init(&mutex_put, NULL);
+    pthread_mutex_init(&mutex_get, NULL);
 
-    struct timeval T0, T1;
+    struct tuple *s, *u;
 
-    char description[100];
+    struct timeval START, T0, T1;
 
     struct context ctx = *((struct context*) args);
 
-    char self[10]; bzero(self, 10);
-
-    memcpy(self, getHostname(), 9);
-    char name[10]; bzero(name, 10);
-
-    s = make_tuple("?i???", 0);
-
     char buff[100];
 
-    pthread_mutex_lock(&mutex);
+    gettimeofday(&START, NULL);
 
-    gettimeofday(&T0, NULL);
-
-
-    for(int i = 1; i <= 100; i++) {
-        for(int j = 2; j <= 21; j++) {
-            s->elements[1].data.i = i;
-            u = get_tuple(s, &ctx);
-            if(u == NULL) {
-                gettimeofday(&T1, NULL);
-                //LOGTUPLE(u, buff);
-                printf("FAILED GET %d  %f\n", i, TIMEVAL_DIFF(T0, T1));
-            } else {
-                gettimeofday(&T1, NULL);
-                LOGTUPLE(u, buff);
-                printf("GET %d  %f %s\n", i, TIMEVAL_DIFF(T0, T1), buff);
-                destroy_tuple(u);
-            }
-
-
+    while(op_gets->size > 0) {
+        struct remaining_op* op = list_remove_head(op_gets);
+        s = op->t;
+        gettimeofday(&T0, NULL);
+        u = get_nb_tuple(s, &ctx);
+        if(u == NULL || u == (struct tuple*) -1) {
+            gettimeofday(&T1, NULL);
+            //LOGTUPLE(u, buff);
+            printf("%s FAILED GET  %d:%d:%d  %f  %f\n", self, op->i, op->j, op->r, TIMEVAL_DIFF(T0, T1), TIMEVAL_DIFF(START, T1));
+            store_op(op_gets, s, op->i, op->j, op->r+1);
+        } else {
+            gettimeofday(&T1, NULL);
+            LOGTUPLE(u, buff);
+            printf("%s GET %d:%d:%d   %f  %f  %s\n", self, op->i, op->j, op->r, TIMEVAL_DIFF(T0, T1), TIMEVAL_DIFF(START, T1), buff);
+            destroy_tuple(u);
+            destroy_tuple(s);
+            inc_get();
         }
+        free(op);
+
     }
 
-    pthread_mutex_unlock(&mutex);
+    pthread_exit(NULL);
 
-//    gettimeofday(&T0, NULL);
-//
-//    while (1) {
-//
-//        u = get_tuple(s, &ctx);
-//        if(u == NULL) {
-//            perror("get_tuple failed");
-//            exit(1);
-//        }
-//
-//        printf("got tuple trouble\n");
-//
-//        t->elements[1] = u->elements[1];
-//        t->elements[2] = u->elements[2];
-//        t->elements[3] = u->elements[3];
-//
-//        bzero(t->elements[4].data.s.ptr, 100);
-//        sprintf(t->elements[4].data.s.ptr, "no more trouble there");
-//        t->elements[4].data.s.len = strlen(t->elements[4].data.s.ptr);
-//
-//        put_tuple(t, &ctx);
-//        printf("put tuple no more trouble\n");
-//
-//
-//        gettimeofday(&T1, NULL);
-//        printf("%f\n", TIMEVAL_DIFF(T0, T1));
-//    }
 }
+
+typedef void *(*threadfunction) (void *);
 
 int
 main(int argc, char *argv[])
 {
-    pthread_mutex_init(&mutex, NULL);
-    struct tuple *s, *t, *u;
 
-    struct timeval T0, T1;
-    struct context ctx, ctx_re;
+    op_puts = list_init();
+    op_gets = list_init();
 
-    unsigned short server_id = 500;
-
-    if (get_server_portnumber(&ctx)) {
-        if (argc < 3) {
-            /* help message */
-            fprintf(stderr,
-                    "Usage: %s <server> <portnumber>\n", argv[0]);
-            exit(1);
-        }
-        strcpy(ctx.peername, argv[1]);
-        ctx.portnumber = atoi(argv[2]);
-    }
-
-    pthread_t resolver;
-    pthread_create(&resolver, NULL, resolver_app, &ctx);
-
-
-
-    char self[10]; bzero(self, 10);
+    bzero(self, 10);
     memcpy(self, getHostname(), 9);
+
+    gettimeofday(&BEGIN, NULL);
+    log_bytes("START");
+
+    pthread_mutex_init(&mutex_put, NULL);
+    pthread_mutex_init(&mutex_get, NULL);
+    struct tuple *s;
+
+    struct timeval START, T0, T1;
+    struct context ctx;
+
+    char* server_ip = "169.254.242.48";
+    strcpy(ctx.peername, server_ip);
+    ctx.portnumber = 5000;
+
+
+    init_batman();
+
     char name[10]; bzero(name, 10);
-
-    s = make_tuple("sidds", self , 0,0,0, name);
-
-    char buff[100];
-
-    gettimeofday(&T0, NULL);
-
+    char buff[100]; bzero(buff, 100);
 
     for(int i = 1; i <= 100; i++) {
         for(int j = 2; j <= 21; j++) {
+            struct timespec now;
+            clock_gettime(CLOCK_MONOTONIC, &now);
+            sprintf(buff,"%ld%ld%s", now.tv_sec, now.tv_nsec, self);
+            int hash = djb2(buff);
+            s = make_tuple(hash,"sidds", self , 0,0.0,0.0, name);
             int rnd = random_int();
             double X = rnd / 2;
             double Y = rnd / 3;
@@ -220,59 +325,71 @@ main(int argc, char *argv[])
             s->elements[2].data.d = X;
             s->elements[3].data.d = Y;
             sprintf(name, "raspi-%02d", j);
-            s->elements[4].data.s.ptr = name;
-            s->elements[4].data.s.len = strlen(name);
-            if(put_tuple(s, &ctx)) {
-                LOGTUPLE(s, buff);
-                gettimeofday(&T1, NULL);
-                printf("FAILED PUT %d:%d   %f  %s\n", i, j, TIMEVAL_DIFF(T0, T1), buff);
-            } else {
-                LOGTUPLE(s, buff);
-                gettimeofday(&T1, NULL);
-                printf("PUT %d:%d   %f  %s\n", i, j, TIMEVAL_DIFF(T0, T1), buff);
-            }
+            int s_len = strlen(name);
+            s->string_space = malloc(s_len);
+            memcpy(s->string_space, name, s_len);
+            s->elements[4].data.s.ptr = s->string_space;
+            s->elements[4].data.s.len = s_len;
+            /**
+             * Put operations
+             */
+            store_op(op_puts, s, i, j, 0);
+
+            /**
+             * Get operations
+             * (hash is only verified on puts)
+             */
+            s = make_tuple(hash,"?i???", 0);
+            s->elements[1].data.i = i;
+            store_op(op_gets, s, i, j, 0);
         }
     }
 
-    pthread_mutex_lock(&mutex);
-    pthread_mutex_unlock(&mutex);
 
-//    while (1) {
-//
-//        int rnd = random_int();
-//        int quadrant = (rnd  % 21) +1;
-//        double X = rnd / 2;
-//        double Y = rnd / 3;
-//
-//        s->elements[1].data.i = quadrant;
-//        s->elements[2].data.d = X;
-//        s->elements[3].data.d = Y;
-//        bzero(s->elements[4].data.s.ptr, 100);
-//        sprintf(s->elements[4].data.s.ptr, "trouble in %d %f %f", quadrant, X, Y);
-//        s->elements[4].data.s.len = strlen(s->elements[4].data.s.ptr);
-//
-//        put_tuple(s, &ctx);
-//
-//        printf("put tuple trouble\n");
-//
-//        t->elements[1].data.i = quadrant;
-//        t->elements[2].data.d = X;
-//        t->elements[3].data.d = Y;
-//
-//        u = get_tuple(t, &ctx);
-//
-//        if (u == NULL) {
-//            perror("get_tuple failed");
-//            exit(1);
-//        }
-//
-//        printf("%s\n", u->elements[4].data.s.ptr);
-//
-//
-//        gettimeofday(&T1, NULL);
-//        printf("%f\n", TIMEVAL_DIFF(T0, T1));
-//
-//        sleep(1);
-//    }
+    sleep(120);
+
+    log_bytes("BEGIN");
+
+    pthread_t resolver;
+    pthread_create(&resolver, NULL, resolver_app, &ctx);
+
+
+    pthread_t counter;
+    pthread_create(&counter, NULL, (threadfunction) counter_fun, NULL);
+
+    pthread_t control;
+    pthread_create(&control, NULL, (threadfunction) control_func, NULL);
+
+    gettimeofday(&START, NULL);
+
+
+    while(op_puts->size > 0) {
+        struct remaining_op* op = list_remove_head(op_puts);
+        s = op->t;
+        gettimeofday(&T0, NULL);
+        if(put_tuple(s, &ctx)) {
+            LOGTUPLE(s, buff);
+            gettimeofday(&T1, NULL);
+            printf("%s FAILED PUT %d:%d:%d  %f  %f  %s\n", self, op->i, op->j, op->r, TIMEVAL_DIFF(T0, T1), TIMEVAL_DIFF(START, T1), buff);
+            store_op(op_puts,s, op->i, op->j, op->r+1);
+        } else {
+            LOGTUPLE(s, buff);
+            gettimeofday(&T1, NULL);
+            printf("%s PUT %d:%d:%d   %f  %f  %s\n", self, op->i, op->j, op->r, TIMEVAL_DIFF(T0, T1), TIMEVAL_DIFF(START, T1), buff);
+            inc_put();
+            destroy_tuple(s);
+        }
+        free(op);
+    }
+
+    void* ptr = NULL;
+    pthread_join(resolver, &ptr);
+    stop = 1;
+    pthread_join(counter, &ptr);
+
+    log_bytes("END");
+
+    pthread_join(control, &ptr);
+
 
 }

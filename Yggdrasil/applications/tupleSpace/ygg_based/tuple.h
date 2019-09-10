@@ -206,6 +206,7 @@ struct element
  */
 struct tuple
 {
+    int hash;
 	/**
 	 * The number of elements in this tuple.
 	 */
@@ -288,6 +289,7 @@ struct context
 	queue_t* inBox;
 	unsigned short ygg_id;
 	unsigned short server_ygg_id;
+	int rid;
 
 };
 
@@ -305,7 +307,7 @@ extern int logptr;
 extern int get_server_portnumber(struct context *ctx);
 extern void print_element(struct element *e);
 extern void print_tuple(struct tuple *s);
-extern struct tuple *make_tuple(char *fmt, ...);
+extern struct tuple *make_tuple(int hash, char *fmt, ...);
 extern void destroy_tuple(struct tuple *t);
 extern int tuples_match(struct tuple *s, struct tuple *t);
 extern unsigned int random_int(void);

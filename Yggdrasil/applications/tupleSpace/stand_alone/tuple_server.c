@@ -156,7 +156,7 @@ static struct ttuple *last_message = NULL;
 
 
 
-#define MAXNUMTHREADS 16
+#define MAXNUMTHREADS 64
 
 /**
  * Maintain a list of the clients currently trying to access tuple
@@ -199,26 +199,27 @@ static pthread_cond_t  blocked_cond;
 #endif
 
 
-static void print_status(void)
-{
-  int i;
-  static char lastprint[MAXNUMTHREADS+1];
-
-  if (!strcmp(lastprint, status_list)) return;
-  strcpy(lastprint, status_list);
-  fprintf(stderr,status_list);
-  for (i=0; i<MAXNUMTHREADS; i++)
-    fputc(8,stderr);
-  fflush(stderr);
-}
+//static void print_status(void)
+//{
+//  int i;
+//  static char lastprint[MAXNUMTHREADS+1];
+//
+//  if (!strcmp(lastprint, status_list)) return;
+//  strcpy(lastprint, status_list);
+//  fprintf(stderr,status_list);
+//  for (i=0; i<MAXNUMTHREADS; i++)
+//    fputc(8,stderr);
+//  fflush(stderr);
+//}
 
 
 static void print_thread_func(void *varg)
 {
   while (1)
   {
-    print_status();
-    usleep(1000);
+    //print_status();
+    usleep(10000);
+    fflush(stdout);
   }
 }
 
@@ -368,12 +369,14 @@ handle_get_read(struct context *ctx,
 					DBGPRINTF("remove=%d\n", remove);
 					if (remove) {
 						add_tuple_to_space(p->tuple);
+						free(p);
 						destroy_tuple(s);
 						return;
 					}
 				}
 				if (remove) {
 					destroy_tuple(p->tuple);
+					free(p);
 				}
 				destroy_tuple(s);
 				return;
@@ -408,11 +411,12 @@ handle_get_read(struct context *ctx,
 		}
 		else {
 			/* don't wait, return a failure code */
+
 			int ack = -1;
-			if (send_chunk(ctx, (char *) &ack, sizeof(int)))
-			{
-				perror("Cannot send -1 return code");
-			}
+            if (send_chunk(ctx, (char *) &ack, sizeof(int)))
+            {
+                perror("Cannot send -1 return code");
+            }
 			return;
 		}
 	}
@@ -600,8 +604,22 @@ client_thread_func(void *varg)
 #endif
         char buff[100];
         LOGTUPLE_LOCAL(s, buff);
-        printf("%s(%d) puts a tuple: %s\n", ctx->peername, ctx->id, buff);
-		add_tuple_to_space(s);
+        struct ttuple *p;
+        int dup = 0;
+        GETACCESS;
+        for (p = first_message; p != NULL; p = p->next) {
+            if(p->tuple->hash == s->hash) {
+                dup = 1;
+                break;
+            }
+        }
+        YIELDACCESS
+        if(dup) {
+            printf("%s(%d) dups a tuple: %s\n", ctx->peername, ctx->id, buff);
+        } else {
+            printf("%s(%d) puts a tuple: %s\n", ctx->peername, ctx->id, buff);
+            add_tuple_to_space(s);
+        }
 		// Why is this??? - Bram
 		/* send an ack */
 		send(ctx->sock, &operation, sizeof(int), MSG_NOSIGNAL);
@@ -729,6 +747,8 @@ client_thread_func(void *varg)
 
 typedef void *(*threadfunction) (void *);
 
+
+
 /**
  * Set up a socket to listen for incoming requests. When one arrives,
  * start a pthread to handle it, and run client_thread_func().
@@ -736,6 +756,7 @@ typedef void *(*threadfunction) (void *);
 int
 main(int argc, char *argv[])
 {
+
 	int i, server_sock;
 	int portnumber, status;
 	int reuseaddr=1;
@@ -747,18 +768,19 @@ main(int argc, char *argv[])
 
 	i_am_server = 1;
 
-	if (argc < 2) {
-		/* help message */
-		fprintf(stderr, "Need a port number as a cmd line arg\n");
-		exit(1);
-	}
+//	if (argc < 2) {
+//		/* help message */
+//		fprintf(stderr, "Need a port number as a cmd line arg\n");
+//		exit(1);
+//	}
 
-	portnumber = atoi(argv[1]);
-	if (portnumber == 0) {
-		/* help message */
-		fprintf(stderr, "Need a port number as a cmd line arg\n");
-		exit(1);
-	}
+	//portnumber = atoi(argv[1]);
+    portnumber = 5000;
+//	if (portnumber == 0) {
+//		/* help message */
+//		fprintf(stderr, "Need a port number as a cmd line arg\n");
+//		exit(1);
+//	}
 
 	pthread_setconcurrency(MAXNUMTHREADS);
 	pthread_attr_init(&threadattrs);
@@ -797,7 +819,7 @@ main(int argc, char *argv[])
 		exit(1);
 	}
 
-	status = listen(server_sock, MAXNUMTHREADS*4);
+	status = listen(server_sock, MAXNUMTHREADS);
 	if (status < 0) {
 		fprintf(stderr, __FILE__ " line %d\n", __LINE__);
 		perror("listen() failed");
@@ -822,7 +844,7 @@ main(int argc, char *argv[])
 #endif
 
 	pthread_t printthread_id;
-	if (getenv("LINUXTUPLES_STATUS"))
+	//if (getenv("LINUXTUPLES_STATUS"))
 		pthread_create(&printthread_id, 0, (threadfunction) print_thread_func, 0);
 
 	while (1) {

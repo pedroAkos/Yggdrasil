@@ -27,6 +27,7 @@
 #include "proto_data_struct.h"
 
 
+
 typedef enum bool_t {false, true} bool;
 
 typedef void (*destroy_function)(void*);

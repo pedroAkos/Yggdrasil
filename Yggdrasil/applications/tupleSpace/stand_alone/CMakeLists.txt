@@ -1,6 +1,7 @@
 
+include_directories(../../../)
 
-link_libraries(pthread m)
+link_libraries(pthread m hashfunctions list)
 
 
 add_executable(Ts tuple_server.c tuple.c)

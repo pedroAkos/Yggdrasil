@@ -190,8 +190,8 @@ static int out_of_range(originator_entry* origin, unsigned short omg_seq_number,
 				short newWindow[window_size];
 				bzero(newWindow, window_size*sizeof(short));
 
-				memcpy(newWindow, entry->window+tomove, (window_size -tomove)*sizeof(short));
-				memcpy(entry->window, newWindow, window_size*sizeof(short));
+				MEMCPY(newWindow, entry->window+tomove, (window_size -tomove)*sizeof(short));
+				MEMCPY(entry->window, newWindow, window_size*sizeof(short));
 			} else
 				bzero(entry->window, window_size*sizeof(short));
 
@@ -206,6 +206,7 @@ static int out_of_range(originator_entry* origin, unsigned short omg_seq_number,
 			int purge_s = window_size*10;
 			if(entry->last_valid + purge_s < time(NULL)) {
 				//remove it;
+                it = it->next;
 
 				stats* torm = NULL;
 				if(prev != NULL)
@@ -213,7 +214,7 @@ static int out_of_range(originator_entry* origin, unsigned short omg_seq_number,
 				else
 					torm = list_remove_head(origin->best_next_hops);
 
-				it = it->next;
+
 
 				torm->neighbour_ref = NULL;
 				free(torm->window);
@@ -295,8 +296,8 @@ static int update_origin_stats(batman_state* state, uuid_t origin, WLANAddr* ori
 	if(entry == NULL) {
 		//create new entry
 		originator_entry* new_origin = malloc(sizeof(originator_entry));
-		memcpy(new_origin->node_id, origin, sizeof(uuid_t));
-		memcpy(new_origin->addr.data, origin_addr->data, WLAN_ADDR_LEN);
+		MEMCPY(new_origin->node_id, origin, sizeof(uuid_t));
+		MEMCPY(new_origin->addr.data, origin_addr->data, WLAN_ADDR_LEN);
 		new_origin->current_seq_number = omg_seq_number;
 
 		new_origin->best_next_hops = list_init();
@@ -401,7 +402,7 @@ static short process_msg(YggMessage* msg, batman_state* state) {
 			retrasnmit = update_origin_stats(state, origin, &origin_addr, trasnmiter, omg_ttl, omg_seq_number);
 
 			if(retrasnmit && omg_ttl >= 2) {
-				memcpy(id_ptr, state->my_id, sizeof(uuid_t));
+				MEMCPY(id_ptr, state->my_id, sizeof(uuid_t));
 				retrasnmit = true;
 			} else
 			    retrasnmit = false;
@@ -409,8 +410,15 @@ static short process_msg(YggMessage* msg, batman_state* state) {
 		}
 
 
-	} else  {
-		//destination is me?
+	} else  { //destination is me?
+	/**
+	 * this is true and ok because size of pushed is > 0
+	 * | (2) pushed size | (2)   ttl    | (6) src_addr   |
+	 * |-------------------------------------------------|
+	 * | (2) proto_origin| (6) dest_addr| (2) payload_len|
+	 * |-------------------------------------------------|
+	 * | (payload_len)       payload                     |
+	 * */
 
         ttl_pos = (unsigned short*) ptr;
         unsigned short msg_ttl;
@@ -441,18 +449,19 @@ static short process_msg(YggMessage* msg, batman_state* state) {
 			//no
 			neighbour_item* next_hop = find_best_next_hop(state->routing_table, &dest_addr);
 			if(next_hop != NULL && msg_ttl > 0) {
-				memcpy(msg->header.dst_addr.mac_addr.data, next_hop->addr.data, WLAN_ADDR_LEN);
+				MEMCPY(msg->header.dst_addr.mac_addr.data, next_hop->addr.data, WLAN_ADDR_LEN);
 				retrasnmit = true;
 //				wlan2asc(&msg->header.dst_addr.mac_addr, to_send);
 //				printf(" next hop: %s\n", to_send);
 			}
 			else {
-			    printf("\n");
+
                 char log_msg[200]; bzero(log_msg, 200);
-                char src_str[33], dst_str[33]; bzero(src_str, 33); bzero(dst_str, 33);
+                char src_str[33], via_str[33], dst_str[33]; bzero(src_str, 33); bzero(via_str, 33); bzero(dst_str, 33);
                 wlan2asc(src_addr, src_str);
+                wlan2asc(&msg->header.src_addr.mac_addr, via_str);
                 wlan2asc(&dest_addr, dst_str);
-                sprintf(log_msg, "dropping msg from %s to %s", src_str, dst_str);
+                sprintf(log_msg, "dropping msg from %s via %s to %s ttl: %d", src_str, via_str, dst_str, msg_ttl);
                 ygg_log("BATMAN", "NO ROUTE TO HOST", log_msg);
                 //print_routing_table(state);
             }
@@ -540,10 +549,9 @@ static short route(YggMessage* msg, batman_state* state) {
     neighbour_item* next_hop = find_best_next_hop(state->routing_table, &msg->header.dst_addr.mac_addr);
     if(next_hop == NULL) {
         char log_msg[200]; bzero(log_msg, 200);
-        char src_str[33], dst_str[33]; bzero(src_str, 33); bzero(dst_str, 33);
-        wlan2asc(&msg->header.src_addr.mac_addr, src_str);
+        char dst_str[33]; bzero(dst_str, 33);
         wlan2asc(&msg->header.dst_addr.mac_addr, dst_str);
-        sprintf(log_msg, "dropping msg from %s to %s", src_str, dst_str);
+        sprintf(log_msg, "dropping msg to %s", dst_str);
         ygg_log("BATMAN", "NO ROUTE TO HOST", log_msg);
         //print_routing_table(state);
         return FAILED;
@@ -557,8 +565,8 @@ static short route(YggMessage* msg, batman_state* state) {
     */
 
     void* buff = malloc(sizeof(unsigned short) + WLAN_ADDR_LEN);
-        memcpy(buff, &state->ttl, sizeof(unsigned short));
-        memcpy(buff+ sizeof(unsigned short), state->my_addr.data, WLAN_ADDR_LEN);
+        MEMCPY(buff, &state->ttl, sizeof(unsigned short));
+        MEMCPY(buff+ sizeof(unsigned short), state->my_addr.data, WLAN_ADDR_LEN);
 
     pushPayload(msg,(char *) buff, sizeof(unsigned short)+WLAN_ADDR_LEN, state->protoId, &next_hop->addr);
 
@@ -624,9 +632,12 @@ static void * batman_main_loop(main_loop_args* args) {
 		switch(elem.type) {
 		case YGG_MESSAGE:
 		    if(elem.data.msg.Proto_id != state->protoId) { //not from me
+		        //printf("routing msg\n");
 		        route(&elem.data.msg, state);
-		    } else
-			    process_msg(&elem.data.msg, state);
+		    } else {
+                //printf("received announce\n");
+                process_msg(&elem.data.msg, state);
+            }
 			break;
 		case YGG_TIMER:
             if(elem.data.timer.proto_dest != state->protoId) { //not for me
