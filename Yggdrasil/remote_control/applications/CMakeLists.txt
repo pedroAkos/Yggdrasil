@@ -9,8 +9,8 @@ include_directories(../../)
 include_directories(../../../Yggdrasil-LowLevelLib)
 
 
-add_executable(YggdrasilControlProcess ControlStructure.c)
-target_link_libraries(YggdrasilControlProcess control_tree control_server control_discovery)
+add_executable(YggdrasilControlProcess_old ControlStructure.c)
+target_link_libraries(YggdrasilControlProcess_old control_tree control_server control_discovery)
 
 
 

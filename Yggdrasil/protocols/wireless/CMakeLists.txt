@@ -10,7 +10,7 @@ include_directories(../../)
 include_directories(../../core)
 include_directories(../../../Yggdrasil-LowLevelLib)
 
-link_libraries(yggcore_wireless)
+link_libraries(yggcore_wireless_new)
 
 #aggregation
 add_library(flow_updating

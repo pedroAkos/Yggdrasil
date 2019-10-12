@@ -6,6 +6,7 @@ cmake_minimum_required(VERSION 2.8)
 project(Yggdrasil_ll)
 
 
+
 # get all *.cpp files recursively
 file(GLOB_RECURSE SRC_FILES_SRC ${PROJECT_SOURCE_DIR}/src/*.c)
 file(GLOB_RECURSE SRC_IP_FILES_SRC ${PROJECT_SOURCE_DIR}/src_ip/*.c)
@@ -24,6 +25,14 @@ target_link_libraries(ygglib_ip PUBLIC ygglib_base)
 target_link_libraries(ygglib_wireless PUBLIC ygglib_base nl-genl-3 nl-3)
 target_include_directories(ygglib_wireless PUBLIC /usr/include/libnl3)
 #target_link_options(ygglib_wireless PUBLIC "-lnl-genl-3 -lnl-3")
+
+add_library(ygglib_wireless_new ${SRC_WIRELESS_FILES_SRC})
+target_compile_definitions(ygglib_wireless_new PUBLIC NEW)
+target_link_libraries(ygglib_wireless_new PUBLIC ygglib_base nl-genl-3 nl-3)
+target_include_directories(ygglib_wireless_new PUBLIC /usr/include/libnl3)
+add_executable(filters test/dynamic_filter.c)
+target_link_libraries(filters ygglib_wireless_new pthread)
+
 
 # include headers
 #[[

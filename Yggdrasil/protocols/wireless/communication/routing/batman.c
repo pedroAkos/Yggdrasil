@@ -13,6 +13,8 @@
 
 #define SEQNO_MAX 65535
 
+#define BI_LINK_TIMEOUT 2
+
 static short OGM = 0;
 //static short MSG = 1;
 
@@ -38,6 +40,7 @@ typedef struct originator_entry_{
 	neighbour_item* best_hop;
 	list* best_next_hops;
 }originator_entry;
+
 
 typedef struct _batman_state {
 	unsigned int seq_number;
@@ -83,20 +86,25 @@ static stats* find_hop(list* hops, neighbour_item* hop) {
 	return list_find_item(hops, (equal_function) equal_ref, hop);
 }
 
-static neighbour_item* set_best_hop(originator_entry* origin) {
+
+static bool is_bidirectional(int last_recorded, batman_state* state) {
+    return ((last_recorded + BI_LINK_TIMEOUT)% SEQNO_MAX) >= state->last_seq_number_sent;
+}
+
+static neighbour_item* set_best_hop(originator_entry* origin, batman_state* state) {
 	list_item* it = origin->best_next_hops->head;
 	neighbour_item* best = origin->best_hop;
 
 	stats* hop = find_hop(origin->best_next_hops, best);
 	int p;
-	if(hop != NULL)
-		p  = hop->packet_count;
-	else
+	if(hop != NULL && is_bidirectional( *((int*)best->attribute), state))
+        p = hop->packet_count;
+    else
 		p = 0;
 
 	while(it != NULL) {
 		stats* next_hops = it->data;
-		if(p < next_hops->packet_count && *((int*)next_hops->neighbour_ref->attribute) == 1){
+		if(p < next_hops->packet_count && is_bidirectional( *((int*)next_hops->neighbour_ref->attribute), state)){
 			p = next_hops->packet_count;
 			best = next_hops->neighbour_ref;
 		}
@@ -151,7 +159,7 @@ static int is_in_window(unsigned short omg_seq_number, int upperbound, int lower
 	}
 }
 
-static int out_of_range(originator_entry* origin, unsigned short omg_seq_number, neighbour_item* trasnmiter, unsigned short omg_ttl, int window_size) {
+static int out_of_range(batman_state* state, originator_entry* origin, unsigned short omg_seq_number, neighbour_item* trasnmiter, unsigned short omg_ttl, int window_size) {
 
 	int seq_no = -1;
 	int upperbound = origin->current_seq_number;
@@ -201,6 +209,9 @@ static int out_of_range(originator_entry* origin, unsigned short omg_seq_number,
 				entry->packet_count ++;
 				entry->last_ttl = omg_seq_number;
 				entry->last_valid = time(NULL);
+//				char str[37]; char str_2[37];  bzero(str, 37); bzero(str_2, 37);
+//				uuid_unparse(origin->node_id, str); uuid_unparse(entry->neighbour_ref->id, str_2);
+//				printf("updated entry: %s for origin: %s packet count: %d windown moved: %d\n", str_2, str, entry->packet_count, torm);
 			}
 
 			int purge_s = window_size*10;
@@ -271,13 +282,22 @@ static int out_of_range(originator_entry* origin, unsigned short omg_seq_number,
 				hop->packet_count ++;
 				hop->last_ttl = omg_ttl;
 				hop->last_valid = time(NULL);
+//                char str[37]; char str_2[37];  bzero(str, 37); bzero(str_2, 37);
+//                uuid_unparse(origin->node_id, str); uuid_unparse(hop->neighbour_ref->id, str_2);
+//                printf("updated entry: %s for origin: %s packet count: %d\n", str_2, str, hop->packet_count);
 			}
 		}
 
 	}
 
 	if(seq_no >= 0)
-		origin->best_hop = set_best_hop(origin);
+		origin->best_hop = set_best_hop(origin, state);
+
+//	if(origin->best_hop != NULL) {
+//        char str[37]; char str_2[37];  bzero(str, 37); bzero(str_2, 37);
+//        uuid_unparse(origin->node_id, str); uuid_unparse(origin->best_hop->id, str_2);
+//        printf("best hop: %s for origin: %s is: %s last_recorded: %d last_sent: %d\n", str_2, str, is_bidirectional(*((int*)origin->best_hop->attribute), state)?"Bi":"Uni", *((int*)origin->best_hop->attribute), state->last_seq_number_sent);
+//	}
 
 	return seq_no;
 }
@@ -285,6 +305,7 @@ static int out_of_range(originator_entry* origin, unsigned short omg_seq_number,
 static int is_best_hop(originator_entry* origin, neighbour_item* trasnmiter) {
 	return origin->best_hop == trasnmiter;
 }
+
 
 
 static int update_origin_stats(batman_state* state, uuid_t origin, WLANAddr* origin_addr, neighbour_item* trasnmiter, unsigned short omg_ttl, unsigned int omg_seq_number) {
@@ -313,10 +334,11 @@ static int update_origin_stats(batman_state* state, uuid_t origin, WLANAddr* ori
 
 		list_add_item_to_head(new_origin->best_next_hops, trasnmiter_stats);
 
-		if(*((int*)trasnmiter->attribute) == 1)
-			new_origin->best_hop = trasnmiter;
-		else
-			new_origin->best_hop = NULL;
+        new_origin->best_hop = trasnmiter;
+//		if(is_bidirectional(*((int*)trasnmiter->attribute), state))
+//            new_origin->best_hop = trasnmiter;
+//		else
+//			new_origin->best_hop = NULL;
 
 		list_add_item_to_head(state->routing_table, new_origin);
 
@@ -325,18 +347,13 @@ static int update_origin_stats(batman_state* state, uuid_t origin, WLANAddr* ori
 	} else if(entry->current_seq_number != omg_seq_number){
 		//update entry
 
-		if(memcmp(origin_addr->data, trasnmiter->addr.data, WLAN_ADDR_LEN) == 0) {
-			//first hop;
-			retrasmit = 1;
-		}
+        int seq_out = out_of_range(state, entry, omg_seq_number, trasnmiter, omg_ttl, state->window_size);
 
-		int seq_out = out_of_range(entry, omg_seq_number, trasnmiter, omg_ttl, state->window_size);
-
-		if(is_best_hop(entry, trasnmiter) && seq_out >= 0) {
-			retrasmit = 1;
-		} else if(seq_out < 0) {
-			retrasmit = 0;
-		}
+        if(is_best_hop(entry, trasnmiter) && seq_out >= 0) {
+            retrasmit = 1;
+        } else if(seq_out < 0) {
+            retrasmit = 0;
+        }
 
 	}
 
@@ -355,15 +372,18 @@ static short process_msg(YggMessage* msg, batman_state* state) {
 		WLANAddr origin_addr;
 		uuid_t origin;
 		uuid_t trasnmiter_id;
-		unsigned short unidirectional_flag;
+		unsigned short unidirectional_flag, direct_link_flag;
 		unsigned short omg_ttl;
-		unsigned int omg_seq_number;
+		int omg_seq_number;
 		void* id_ptr = ptr;
 		ptr = YggMessage_readPayload(msg, ptr, trasnmiter_id, sizeof(uuid_t));
 		unsigned short* uni_flag_ptr = (unsigned short*) ptr;
 		ptr = YggMessage_readPayload(msg, ptr, &unidirectional_flag, sizeof(unsigned short));
+        unsigned short* bi_flag_ptr = (unsigned short*) ptr;
+        ptr = YggMessage_readPayload(msg, ptr, &direct_link_flag, sizeof(unsigned short));
 		ptr = YggMessage_readPayload(msg, ptr, origin_addr.data, WLAN_ADDR_LEN);
 		ptr = YggMessage_readPayload(msg, ptr, origin, sizeof(uuid_t));
+
 
 		if(uuid_compare(origin, state-> my_id) == 0){
 			//drop packet and check link as biderectional
@@ -371,14 +391,14 @@ static short process_msg(YggMessage* msg, batman_state* state) {
 			ptr = YggMessage_readPayload(msg, ptr, &omg_ttl, sizeof(unsigned short));
 			ptr = YggMessage_readPayload(msg, ptr, &omg_seq_number, sizeof(unsigned int));
 			neighbour_item* trasnmiter = neighbour_find_by_addr(state->direct_links, trasnmiter_addr);
-			if(omg_seq_number == state->last_seq_number_sent) {
+			if(omg_seq_number == state->last_seq_number_sent || direct_link_flag == 1) {
 				if(trasnmiter != NULL)
-					*((int*)trasnmiter->attribute) = 1;
+					*((int*)trasnmiter->attribute) = (int) omg_seq_number;
 				else {
-					int is_direct_link = 1;
-					trasnmiter = new_neighbour(trasnmiter_id, *trasnmiter_addr, &is_direct_link, sizeof(int), NULL);
+					trasnmiter = new_neighbour(trasnmiter_id, *trasnmiter_addr,  &omg_seq_number, sizeof(int), NULL);
 					neighbour_add_to_list(state->direct_links, trasnmiter);
 				}
+
 			}
 		} else if(unidirectional_flag == 0) {
 
@@ -386,20 +406,24 @@ static short process_msg(YggMessage* msg, batman_state* state) {
 			ptr = YggMessage_readPayload(msg, ptr, &omg_ttl, sizeof(unsigned short));
 			ptr = YggMessage_readPayload(msg, ptr, &omg_seq_number, sizeof(unsigned int));
 
-			neighbour_item* trasnmiter = neighbour_find_by_addr(state->direct_links, trasnmiter_addr);
+			neighbour_item* transmiter = neighbour_find_by_addr(state->direct_links, trasnmiter_addr);
 
-			if(trasnmiter == NULL){
+			if(transmiter == NULL){
 
-				int is_direct_link = 0;
-				trasnmiter = new_neighbour(trasnmiter_id, *trasnmiter_addr, &is_direct_link, sizeof(int), NULL);
-				neighbour_add_to_list(state->direct_links, trasnmiter);
-				*uni_flag_ptr = 1;
-
-			} else if(*((int*)trasnmiter->attribute) == 0) {
-				*uni_flag_ptr = 1;
+				int is_direct_link = -1;
+                transmiter = new_neighbour(trasnmiter_id, *trasnmiter_addr, &is_direct_link, sizeof(int), NULL);
+				neighbour_add_to_list(state->direct_links, transmiter);
 			}
 
-			retrasnmit = update_origin_stats(state, origin, &origin_addr, trasnmiter, omg_ttl, omg_seq_number);
+			if( *((int*)transmiter->attribute) == -1 || !is_bidirectional(*((int*)transmiter->attribute), state)) {
+				*uni_flag_ptr = 1;
+			}else {
+			    *bi_flag_ptr = 1;
+                retrasnmit = update_origin_stats(state, origin, &origin_addr, transmiter, omg_ttl, omg_seq_number);
+			}
+
+            if(uuid_compare(origin, trasnmiter_id) == 0)
+                retrasnmit = true;
 
 			if(retrasnmit && omg_ttl >= 2) {
 				MEMCPY(id_ptr, state->my_id, sizeof(uuid_t));
@@ -493,6 +517,8 @@ static short process_timer(YggTimer* timer, batman_state* state) {
 		YggMessage_addPayload(&ogm, (char*) state->my_id, sizeof(uuid_t));
 		//add unidirectional flag
 		YggMessage_addPayload(&ogm, (char*) &zero, sizeof(unsigned short));
+        //add direct_link flag
+        YggMessage_addPayload(&ogm, (char*) &zero, sizeof(unsigned short));
 		//add my addr,
 		YggMessage_addPayload(&ogm, (char*) state->my_addr.data, WLAN_ADDR_LEN);
 		//add my originator id,

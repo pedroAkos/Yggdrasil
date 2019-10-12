@@ -28,6 +28,7 @@ void main(int argc, char* argv[]) {
 
 	short myId = 400;
 
+
 	app_def* myapp = create_application_definition(myId, "MyApp");
 
 	app_def_add_consumed_events(myapp, PROTO_HYPARVIEW, OVERLAY_NEIGHBOUR_UP);

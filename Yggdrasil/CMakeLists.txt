@@ -15,6 +15,7 @@ add_subdirectory(utils)
 add_subdirectory(applications)
 
 add_subdirectory(remote_control)
+add_subdirectory(remote_control_new)
 
 # get all *.c files recursively
 #file(GLOB_RECURSE SRC_FILES_CORE ${PROJECT_SOURCE_DIR}/core/*.c)

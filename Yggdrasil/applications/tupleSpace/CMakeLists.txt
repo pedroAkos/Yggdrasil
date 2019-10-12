@@ -7,6 +7,8 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -O3")
 
 add_subdirectory("ygg_based")
 add_subdirectory("stand_alone")
+add_subdirectory("distributed_ygg_based")
+add_subdirectory("distruted_stand_alone")
 
 add_executable(init init.c)
 target_link_libraries(init yggcore_wireless)

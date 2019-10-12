@@ -15,6 +15,10 @@
 #include <linux/nl80211.h>
 #include <linux/filter.h>
 
+#include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 /*********************************************************
  * Default values
@@ -46,5 +50,8 @@ typedef enum _IFTYPE {
  *********************************************************/
 
 const struct sock_filter YGG_filter[8];
+
+
+struct sock_filter* build_filter(const char* filter);
 
 #endif /* YGG_LL_CONSTANTS_H_ */

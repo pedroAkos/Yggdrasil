@@ -41,3 +41,27 @@ const struct sock_filter LKM_filter[] = {
 		{ 0x6, 0, 0, 0x00000000 },
 	};
 
+
+struct sock_filter* build_filter(const char* filter) {
+
+    if(strlen(filter) != 3) {
+        fprintf(stderr, "Cannot define a filter with string: %s - Must have only 3 characters, e.g., YGG\n", filter);
+        exit(1);
+    }
+
+    struct sock_filter sock_f[] = {
+            { 0x30, 0, 0, 0x0000000e },
+            { 0x15, 0, 5, filter[0] },
+            { 0x30, 0, 0, 0x0000000f },
+            { 0x15, 0, 3, filter[1] },
+            { 0x30, 0, 0, 0x00000010 },
+            { 0x15, 0, 1, filter[2] },
+            { 0x6, 0, 0, 0x00040000 },
+            { 0x6, 0, 0, 0x00000000 },
+    };
+
+    struct sock_filter* tort = malloc(sizeof(struct sock_filter)*8);
+    memcpy(tort, sock_f, sizeof(struct sock_filter)*8);
+
+    return tort;
+}

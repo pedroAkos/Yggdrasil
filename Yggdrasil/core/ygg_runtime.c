@@ -643,6 +643,15 @@ static char* getProtoName(short id) {
 
 }
 
+/**
+ *  basecaly we new a double pointer, that shadowns the intercepeted queue.
+ *  struct _intercepeted_queue {
+ *      mutex_t** lock; //avoid pushing to queue and killing protocol concurrently. the same lock as in the protocol
+ *      queue_t** interecpeted queue; //allow the queue ref to be modified
+ *
+ *  }
+ *  must be opaque, otherwise everything will fail.
+ */
 static void reevaluateQueueDepencies(queue_t* old_queue, queue_t* new_queue) { //TODO make changes visible on protocols
 
 	proto* it = ygg_proto_info.protos;

@@ -15,7 +15,7 @@
 
 int main(int argc, char* argv[]) {
 
-	NetworkConfig* ntconf = defineWirelessNetworkConfig("AdHoc", 0, 5, 0, "ledge", YGG_filter);
+	NetworkConfig* ntconf = defineWirelessNetworkConfig("AdHoc", 0, 5, 0, "ledge", "YGG");
 
 	ygg_runtime_init(ntconf);
 

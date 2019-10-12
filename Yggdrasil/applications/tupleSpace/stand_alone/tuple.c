@@ -760,6 +760,10 @@ open_client_socket(struct context *ctx)
 	 */
 	//struct hostent *he = gethostbyname(ctx->peername);
 
+	int flag=1;
+    if (setsockopt(ctx->sock, SOL_SOCKET, SO_KEEPALIVE, &flag, sizeof(int)))
+        perror("setsockopt KEEPALIVE");
+
     memset(&addr, 0, sizeof(addr));
 
 	inet_pton(AF_INET, ctx->peername, &(addr.sin_addr));

@@ -16,25 +16,52 @@ Interface* interfaces = NULL;
 
 extern int lk_error_code;
 
+
+static void assign_msg_tag(const char* tag) {
+    AF_MSG_TAG[0] = tag[0];
+    AF_MSG_TAG[1] = tag[1];
+    AF_MSG_TAG[2] = tag[2];
+}
+
 /*********************************************************
  * NetworkConfig
  *********************************************************/
+#ifdef NEW
+NetworkConfig* defineWirelessNetworkConfig(char* type, int freq, int nscan, short mandatory, char* name, const char* tag){
+    NetworkConfig* ntconf = (NetworkConfig*) malloc(sizeof(struct __NetworkConfig));
 
+    ntconf->type = MAC;
+
+    ntconf->config.macntconf.type = nameToType(type);
+    ntconf->config.macntconf.freq = channelToFreq(freq);
+    ntconf->config.macntconf.nscan = nscan;
+    ntconf->config.macntconf.mandatoryName = mandatory;
+    ntconf->config.macntconf.name = name;
+    ntconf->config.macntconf.filter = build_filter(tag);
+
+    assign_msg_tag(tag);
+
+    return ntconf;
+}
+#else
 NetworkConfig* defineWirelessNetworkConfig(char* type, int freq, int nscan, short mandatory, char* name, const struct sock_filter* filter){
     NetworkConfig* ntconf = (NetworkConfig*) malloc(sizeof(struct __NetworkConfig));
 
     ntconf->type = MAC;
 
     ntconf->config.macntconf.type = nameToType(type);
-    ntconf->config.macntconf.freq = freq;
+    ntconf->config.macntconf.freq = channelToFreq(freq);
     ntconf->config.macntconf.nscan = nscan;
     ntconf->config.macntconf.mandatoryName = mandatory;
     ntconf->config.macntconf.name = name;
     ntconf->config.macntconf.filter = (struct sock_filter*) filter;
 
+    char tmp[] = AF_YGG_ARRAY;
+    assign_msg_tag(tmp);
+
     return ntconf;
 }
-
+#endif
 /*********************************************************
  *  Phy
  *********************************************************/
@@ -154,8 +181,8 @@ void fillMeshInformation(Mesh* mesh_info, unsigned char *ie, int ielen) {
  *********************************************************/
 int initYggPhyMessage(YggPhyMessage *msg) {
 	msg->phyHeader.type = IP_TYPE;
-	char id[] = AF_YGG_ARRAY;
-	memcpy(msg->yggHeader.data, id, YGG_HEADER_LEN);
+	//char id[] = AF_YGG_ARRAY;
+	memcpy(msg->yggHeader.data, AF_MSG_TAG, YGG_HEADER_LEN);
 
 	bzero(msg->data, MAX_PAYLOAD);
 	return SUCCESS;
@@ -168,8 +195,8 @@ int initYggPhyMessageWithPayload(YggPhyMessage *msg, char* buffer, short bufferl
 		return FAILED;
 
 	msg->phyHeader.type = IP_TYPE;
-	char id[] = AF_YGG_ARRAY;
-	memcpy(msg->yggHeader.data, id, YGG_HEADER_LEN);
+	//char id[] = AF_YGG_ARRAY;
+	memcpy(msg->yggHeader.data, AF_MSG_TAG, YGG_HEADER_LEN);
 
 	bzero(msg->data, MAX_PAYLOAD);
 

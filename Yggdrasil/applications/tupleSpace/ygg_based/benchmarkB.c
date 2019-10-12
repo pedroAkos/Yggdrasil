@@ -142,6 +142,7 @@ void* counter_fun(void) {
         pthread_mutex_unlock(&mutex_put);
     }
 
+    gettimeofday(&T0, NULL);
     printf("%s App-PUT  %d  %f\n", self, counter_put, TIMEVAL_DIFF(START, T0));
     printf("%s App-READ  %d  %f\n", self, counter_read, TIMEVAL_DIFF(START, T0));
     printf("%s App-GET  %d  %f\n", self, counter_get, TIMEVAL_DIFF(START, T0));
@@ -292,22 +293,24 @@ main(int argc, char *argv[])
 
 
     char name[10]; bzero(name, 10);
-    char buff[100]; bzero(buff, 100);
+    char buff[100];
 
     for(int i = 1; i <= 100; i++) {
         for(int j = 2; j <= 21; j++) {
-            struct timespec now;
-            clock_gettime(CLOCK_MONOTONIC, &now);
-            sprintf(buff,"%ld%ld%s", now.tv_sec, now.tv_nsec, self);
-            int hash = djb2(buff);
-            s = make_tuple(hash,"sidds", self , 0,0.0,0.0, name);
+            bzero(buff, 100);
             int rnd = random_int();
             double X = rnd / 2;
             double Y = rnd / 3;
+            sprintf(name, "raspi-%02d", j);
+            struct timespec now;
+            clock_gettime(CLOCK_MONOTONIC, &now);
+            sprintf(buff,"%ld%ld%s%d%f%f%s", now.tv_sec, now.tv_nsec, self, i, X, Y, name);
+
+            int hash = djb2(buff);
+            s = make_tuple(hash,"sidds", self , 0,0.0,0.0, name);
             s->elements[1].data.i = i;
             s->elements[2].data.d = X;
             s->elements[3].data.d = Y;
-            sprintf(name, "raspi-%02d", j);
             int s_len = strlen(name);
             s->string_space = malloc(s_len);
             memcpy(s->string_space, name, s_len);

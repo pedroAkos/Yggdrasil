@@ -11,23 +11,21 @@ include_directories(../core)
 include_directories(../../Yggdrasil-LowLevelLib)
 
 #ONLY WIRELESS
+link_libraries(yggcore_wireless_new)
 
 add_library(aggregation_interface
         aggregation/aggregation_functions.c
         aggregation/aggregation_operations.c
         )
 
-target_link_libraries(aggregation_interface yggcore_wireless)
 
 add_library(discovery_interface
         discovery/discovery_events.c
         )
 
-target_link_libraries(discovery_interface yggcore_wireless)
 
 add_library(routing_interface
         routing/routing_interface.c
         )
 
-target_link_libraries(routing_interface yggcore_wireless)
 

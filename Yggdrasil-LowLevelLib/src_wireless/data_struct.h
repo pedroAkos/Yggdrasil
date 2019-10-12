@@ -48,6 +48,8 @@
 #define AF_YGG 0x594747 //YGG
 #define AF_YGG_ARRAY {0x59, 0x47, 0x47}
 
+char AF_MSG_TAG[3];
+
 #pragma pack(1)
 // Structure of a frame header
 typedef struct _WLANHeader{
@@ -122,8 +124,13 @@ Network* knownNetworks;
 /*************************************************
  * Data structure manipulation
  *************************************************/
-NetworkConfig* defineWirelessNetworkConfig(char* type, int freq, int nscan, short mandatory, char* name, const struct sock_filter* filter);
+#ifdef NEW
+NetworkConfig* defineWirelessNetworkConfig(char* type, int freq, int nscan, short mandatory, char* name, const char* filter);
 
+#else
+
+NetworkConfig* defineWirelessNetworkConfig(char* type, int freq, int nscan, short mandatory, char* name, const struct sock_filter* filter);
+#endif
 /*************************************************
  * Phy
  *************************************************/

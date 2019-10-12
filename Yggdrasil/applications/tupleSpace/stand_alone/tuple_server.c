@@ -805,6 +805,10 @@ main(int argc, char *argv[])
 	if (setsockopt(server_sock, SOL_SOCKET, SO_REUSEADDR, &reuseaddr, sizeof(int)))
 		perror("setsockopt REUSEADDR");
 
+
+    if (setsockopt(server_sock, SOL_SOCKET, SO_KEEPALIVE, &reuseaddr, sizeof(int)))
+        perror("setsockopt KEEPALIVE");
+
 	/* Open network listening socket */
 	memset(&addr, 0, sizeof(addr));
 	addr.sin_family = AF_INET;

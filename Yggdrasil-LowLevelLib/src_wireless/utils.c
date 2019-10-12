@@ -33,6 +33,35 @@ char * wlan2asc(WLANAddr* addr, char str[]) {
     return str;
 }
 
+int channelToFreq(int channel) {
+    switch (channel) {
+        case 1:
+            return 2412;
+        case 2:
+            return 2417;
+        case 3:
+            return 2422;
+        case 4:
+            return 2427;
+        case 5:
+            return 2432;
+        case 6:
+            return 2437;
+        case 7:
+            return 2442;
+        case 8:
+            return 2447;
+        case 9:
+            return 2452;
+        case 10:
+            return 2457;
+        case 11:
+            return 2462;
+        default:
+            return channel;
+    }
+}
+
 /*************************************************
  * Auxiliary Functions
  *************************************************/
@@ -150,8 +179,8 @@ int isYggMessage(void* buffer, int bufferLen) {
         return 0;
 
     unsigned char* p = (buffer+WLAN_HEADER_LEN);
-    unsigned char ygg[YGG_HEADER_LEN] = AF_YGG_ARRAY;
-    if(memcmp(p,ygg,3)==0) {
+    //unsigned char ygg[YGG_HEADER_LEN] = AF_YGG_ARRAY;
+    if(memcmp(p,AF_MSG_TAG,3)==0) {
         return 1;
     }
 
