@@ -350,7 +350,7 @@ int chsend(Channel* ch, YggPhyMessage* message) {
 	struct sockaddr_ll to = {0};
 	setToAddress(&message->phyHeader.destAddr, ch->ifindex, &to);
 
-	usleep((((unsigned int)rand())%100)+1);
+	usleep((((unsigned int)rand())%1000)+1);
 	int sent=sendto(
 			ch->sockid,
 			message, (WLAN_HEADER_LEN+YGG_HEADER_LEN+(sizeof(unsigned short))+ntohs(message->dataLen)), //sizeof(YggPhyMessage)

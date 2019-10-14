@@ -13,10 +13,11 @@ struct received_msg {
     void* msg_contents;
     unsigned short msg_size;
     struct timespec received_at;
+    struct timespec last_sent;
 
     unsigned short proto_request;
 
-    bool delivered; //if delivered or not
+    //bool delivered; //if delivered or not
     list* acks; //list of remaining acks
     YggTimer timeout;
 };
@@ -32,6 +33,7 @@ static bool equal_addr(WLANAddr* addr, WLANAddr* addr2) {
 
 struct state {
     list* received;
+    list* pending;
 
     list* neighs; //enough mac_addrs
 
@@ -44,7 +46,25 @@ struct state {
     short proto_id;
 
     short discov_id;
+
+
 };
+
+static bool clear_to_send(struct state* state, struct received_msg* msg) {
+    bool send = false;
+    struct timespec now; clock_gettime(CLOCK_MONOTONIC, &now);
+    if(msg->last_sent.tv_sec + state->timeout_s < now.tv_sec) {
+        send = true;
+    } else if (msg->last_sent.tv_sec + state->timeout_s == now.tv_sec &&
+                    msg->last_sent.tv_nsec + state->timeout_ns < now.tv_nsec) {
+        send = true;
+    }
+
+    if(send)
+        clock_gettime(CLOCK_MONOTONIC, &msg->last_sent);
+
+    return send;
+}
 
 static struct received_msg* regist_msg(int mid, void* msg_contents, unsigned short msg_size, unsigned short proto_origin, list* acks, struct state* state) {
 
@@ -54,33 +74,37 @@ static struct received_msg* regist_msg(int mid, void* msg_contents, unsigned sho
     msg->msg_size = msg_size;
     msg->proto_request = proto_origin;
     clock_gettime(CLOCK_MONOTONIC, &msg->received_at);
+    msg->last_sent = msg->received_at;
     msg->acks = acks;
 
-    msg->delivered = false;
+    //msg->delivered = false;
     YggTimer_init(&msg->timeout, state->proto_id, state->proto_id);
     YggTimer_set(&msg->timeout, state->timeout_s, state->timeout_ns, 0, 0);
     YggTimer_setType(&msg->timeout, TIMEOUT);
     YggTimer_addPayload(&msg->timeout, &mid, sizeof(int));
     setupTimer(&msg->timeout);
 
-    list_add_item_to_tail(state->received, msg);
+    list_add_item_to_tail(state->pending, msg);
     return msg;
 }
 
 static void trigger_oneHopBcast(struct state* state, int mid, list* missing_acks, unsigned short proto_request, void* payload,
-                                unsigned short payload_length) {
+                                unsigned short payload_length, struct received_msg* r_msg) {
 
-    YggMessage msg; YggMessage_initBcast(&msg, state->proto_id);
-    YggMessage_addPayload(&msg, (char*) &mid, sizeof(int));
-    YggMessage_addPayload(&msg, (char*) &missing_acks->size, sizeof(short));
-    for(list_item* it = missing_acks->head; it != NULL;  it = it->next) {
-        YggMessage_addPayload(&msg, it->data, WLAN_ADDR_LEN);
+    if(clear_to_send(state, r_msg)) {
+        YggMessage msg;
+        YggMessage_initBcast(&msg, state->proto_id);
+        YggMessage_addPayload(&msg, (char *) &mid, sizeof(int));
+        YggMessage_addPayload(&msg, (char *) &missing_acks->size, sizeof(short));
+        for (list_item *it = missing_acks->head; it != NULL; it = it->next) {
+            YggMessage_addPayload(&msg, it->data, WLAN_ADDR_LEN);
+        }
+        YggMessage_addPayload(&msg, (char *) &proto_request, sizeof(unsigned short));
+        YggMessage_addPayload(&msg, (char *) payload, payload_length);
+
+        dispatch(&msg);
+        YggMessage_freePayload(&msg);
     }
-    YggMessage_addPayload(&msg, (char*) &proto_request, sizeof(unsigned short));
-    YggMessage_addPayload(&msg, (char*) payload, payload_length);
-
-    dispatch(&msg);
-    YggMessage_freePayload(&msg);
 
 }
 
@@ -132,8 +156,10 @@ static void process_msg(YggMessage* msg, struct state* state) {
     payload_len = msg->dataLen -  (payload - (void*) msg->data);
 
     struct received_msg* r_msg = list_find_item(state->received, (equal_function) equal_msg, &mid);
+    struct received_msg* p_msg = list_find_item(state->pending, (equal_function) equal_msg, &mid);
 
-    if(!r_msg) {
+    bool send = false;
+    if(!r_msg && !p_msg) {
         void* to_store = malloc(payload_len); memcpy(to_store, payload, payload_len);
         list* my_acks = list_init();
         for(list_item* it = state->neighs->head; it != NULL; it = it->next) {
@@ -142,20 +168,25 @@ static void process_msg(YggMessage* msg, struct state* state) {
             WLANAddr* addr = malloc(sizeof(WLANAddr)); memcpy(addr, it->data, sizeof(WLANAddr));
             list_add_item_to_head(my_acks, addr);
         }
-        r_msg = regist_msg(mid, to_store, payload_len, proto, my_acks, state);
+        p_msg = regist_msg(mid, to_store, payload_len, proto, my_acks, state);
+        send = true;
         //trigger_oneHopBcast(state, mid, my_acks, proto, payload, payload_len);
     }
 
-    WLANAddr* addr = list_remove_item(r_msg->acks, (equal_function) equal_addr, &msg->header.src_addr.mac_addr);
-    if(addr)
-        free(addr);
-    if(r_msg->acks->size == 0 && !r_msg->delivered) {
-        deliver_msg(proto, payload, payload_len, &msg->header.src_addr.mac_addr);
-        r_msg->delivered = true;
+    if(p_msg) {
+        WLANAddr *addr = list_remove_item(p_msg->acks, (equal_function) equal_addr, &msg->header.src_addr.mac_addr);
+        if (addr)
+            free(addr);
+        if (p_msg->acks->size == 0) {
+            deliver_msg(proto, payload, payload_len, &msg->header.src_addr.mac_addr);
+            list_remove_item(state->pending, (equal_function) equal_msg, &mid);
+            list_add_item_to_head(state->received, p_msg);
+        }
+        r_msg = p_msg;
     }
 
-    if(list_find_item(acks, (equal_function) equal_addr, state->myaddr))
-        trigger_oneHopBcast(state, mid, r_msg->acks, proto, payload, payload_len);
+    if(list_find_item(acks, (equal_function) equal_addr, state->myaddr) || send)
+        trigger_oneHopBcast(state, mid, r_msg->acks, proto, payload, payload_len, r_msg);
 
     while(acks->size > 0) {
         WLANAddr* addr = list_remove_head(acks);
@@ -174,7 +205,7 @@ static void process_timer(YggTimer* timer, struct state* state) {
     if(timer->timer_type == GC) {
         while (state->received->size > 0) {
             struct received_msg *msg = list_remove_head(state->received);
-            if (!expired(msg, state) || !msg->delivered) {
+            if (!expired(msg, state)) {
                 list_add_item_to_head(state->received, msg);
                 break;
             }
@@ -184,9 +215,18 @@ static void process_timer(YggTimer* timer, struct state* state) {
             free(msg);
         }
     } else if(timer->timer_type == TIMEOUT) {
-        struct received_msg* msg = list_find_item(state->received, (equal_function) equal_msg, timer->payload);
-        if(msg && !msg->delivered) {
-            trigger_oneHopBcast(state, msg->hash, msg->acks, msg->proto_request, msg->msg_contents, msg->msg_size);
+        struct received_msg* msg = list_find_item(state->pending, (equal_function) equal_msg, timer->payload);
+        if(msg) {
+            trigger_oneHopBcast(state, msg->hash, msg->acks, msg->proto_request, msg->msg_contents, msg->msg_size, msg);
+
+            if(msg->acks->size == 0) { //in case msg was set for transmission without any known neighbours - solution should default to best effort
+                deliver_msg(msg->proto_request, msg->msg_contents, msg->msg_size, state->myaddr);
+                list_remove_item(state->pending, (equal_function) equal_msg, &msg->hash);
+                list_add_item_to_head(state->received, msg);
+            } else {
+                YggTimer_set(&msg->timeout, state->timeout_s, state->timeout_ns, 0, 0);
+                setupTimer(&msg->timeout);
+            }
         }
         YggTimer_freePayload(timer);
     }
@@ -202,22 +242,57 @@ static void process_request(YggRequest* request, struct state* state) {
             memcpy(addr, it->data, sizeof(WLANAddr));
             list_add_item_to_head(acks, addr);
         }
-        regist_msg(mid, request->payload, request->length, request->proto_origin, acks, state);
+        struct received_msg* msg = regist_msg(mid, request->payload, request->length, request->proto_origin, acks, state);
 
-        trigger_oneHopBcast(state, mid, state->neighs, request->proto_origin, request->payload, request->length);
+        trigger_oneHopBcast(state, mid, state->neighs, request->proto_origin, request->payload, request->length, msg);
     }
 }
 
 static void process_event(YggEvent* ev, struct state* state) {
     if(ev->proto_origin == state->discov_id) {
         if(ev->notification_id == NEIGHBOUR_UP) {
+
+            uuid_t id; YggEvent_readPayload(ev, NULL, id, sizeof(uuid_t)); char str[37]; bzero(str,37); uuid_unparse(id, str);
+            printf("UP: %s\n", str);
+
             WLANAddr* addr = malloc(WLAN_ADDR_LEN); YggEvent_readPayload(ev, ev->payload+ sizeof(uuid_t), addr, WLAN_ADDR_LEN);
             if(!list_find_item(state->neighs, (equal_function) equal_addr, addr))
                 list_add_item_to_head(state->neighs, addr);
             else
                 free(addr);
         } else if(ev->notification_id == NEIGHBOUR_DOWN) {
-            //TODO not implemented
+            uuid_t id; YggEvent_readPayload(ev, NULL, id, sizeof(uuid_t)); char str[37]; bzero(str,37); uuid_unparse(id, str);
+            printf("DOWN: %s\n", str);
+            WLANAddr addr; YggEvent_readPayload(ev, ev->payload+ sizeof(uuid_t), &addr, WLAN_ADDR_LEN);
+            WLANAddr* addr1 = list_remove_item(state->neighs, (equal_function) equal_addr, &addr);
+            if(addr1) {
+                list_item* it = state->pending->head, *prev = NULL;
+                while(it != NULL) {
+                    bool removed = false;
+                    struct received_msg* msg = (struct received_msg*) it->data;
+                    WLANAddr* addr2 = list_remove_item(msg->acks, (equal_function) equal_addr, addr1);
+                    if(addr2) {
+                        if(msg->acks->size == 0) {
+                            deliver_msg(msg->proto_request, msg->msg_contents, msg->msg_size, addr2);
+                            list_remove(state->pending, prev);
+                            list_add_item_to_head(state->received, msg);
+                            if(prev)
+                                it = prev->next; //so that next iteration progresses (prev->next = it->next)
+                            else {
+                                it = state->pending->head;
+                            }
+                            removed = true;
+
+                        }
+                        free(addr2);
+                    }
+                    if(!removed) {
+                        prev = it;
+                        it = it->next;
+                    }
+                }
+                free(addr1);
+            }
         }
     }
 }
@@ -252,6 +327,7 @@ proto_def* reliable_dissemination_init(reliable_dissemination_args* args) {
 
     struct state* state = malloc(sizeof(struct state));
     state->received = list_init();
+    state->pending = list_init();
     state->myaddr = getMyWLANAddr();
     getmyId(state->myid);
     state->proto_id = args->proto_id;

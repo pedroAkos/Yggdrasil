@@ -21,10 +21,11 @@ void send_event_neighbour_up(short proto_id, uuid_t neighbour_id, WLANAddr* neig
 	YggEvent_freePayload(&ev);
 }
 
-void send_event_neighbour_down(short proto_id, uuid_t neighbour_id) {
+void send_event_neighbour_down(short proto_id, uuid_t neighbour_id, WLANAddr* neighbour_addr) {
 	YggEvent ev;
 	YggEvent_init(&ev, proto_id, NEIGHBOUR_DOWN);
 	YggEvent_addPayload(&ev, neighbour_id, sizeof(uuid_t));
+    YggEvent_addPayload(&ev, neighbour_addr->data, WLAN_ADDR_LEN);
 
 	deliverEvent(&ev);
 	YggEvent_freePayload(&ev);

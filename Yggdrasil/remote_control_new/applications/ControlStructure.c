@@ -186,6 +186,7 @@ void process_disseminated_cmd(YggMessage* msg) {
     ptr = YggMessage_readPayload(msg, ptr, &op_num, sizeof(unsigned int));
     printf("received app_op %s for op num %d\n", op==CMD ? "CMD" : "CONTROL", op_num);
     if(op == CMD) {
+        curr_op = op_num;
         store_command(op_num, msg, ptr);
     } else {
         can_execute(op_num, msg, ptr);

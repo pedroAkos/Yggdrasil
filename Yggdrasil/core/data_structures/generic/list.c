@@ -51,15 +51,21 @@ void list_add_item_to_tail(list* l, void* item) {
 
 void* list_remove(list* l, list_item* previous) {
 	void* data_torm = NULL;
-	if(previous != NULL && l != NULL) {
-		list_item* torm = previous->next;
-		if(torm == l->tail) {
-			l->tail = previous;
-			l->tail->next = NULL;
-		} else {
-			previous->next = torm->next;
-			torm->next = NULL;
-		}
+	if(l != NULL) {
+        list_item *torm;
+        if(previous == NULL) {
+            torm = l->head;
+            l->head = l->head->next;
+        } else {
+            torm = previous->next;
+            if (torm == l->tail) {
+                l->tail = previous;
+                l->tail->next = NULL;
+            } else {
+                previous->next = torm->next;
+                torm->next = NULL;
+            }
+        }
 
 		data_torm = torm->data;
 		free(torm);

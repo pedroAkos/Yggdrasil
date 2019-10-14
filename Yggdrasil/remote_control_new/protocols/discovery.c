@@ -4,6 +4,44 @@
 
 #include "discovery.h"
 
+#define MAX_SEQ 10000
+
+static WLANAddr bcast_address;
+
+struct neigh {
+    uuid_t id;
+    WLANAddr mac;
+    uint32_t reliability;
+    short last;
+    short count;
+    bool notified;
+};
+
+static void mark_msg(struct neigh* n,  unsigned short msg_num) {
+
+    short to_mv = msg_num - n->last;
+    if(to_mv < 0)
+        to_mv = (MAX_SEQ - n->last) + msg_num;
+
+//    char str[37]; bzero(str, 37); uuid_unparse(n->id, str);
+//    printf("neigh: %s %p is %d reliable (%d) to_mv: %d count: %d seq: %d notified: %s\n", str, n, n->count, n->reliability, to_mv,n->last, msg_num, n->notified == true ? "yes" : "no");
+
+    uint32_t reliability = n->reliability;
+
+    reliability = reliability << (uint32_t) to_mv;
+
+    uint32_t flag = 1;
+    reliability |= flag;
+
+    n->last = msg_num;
+    n->count = __builtin_popcount(reliability);
+    n->reliability = reliability;
+}
+
+static bool equal_neigh(struct neigh* n, WLANAddr* addr) {
+    return memcmp(n->mac.data, addr->data, WLAN_ADDR_LEN) == 0;
+}
+
 struct state {
     list* neighs;
 
@@ -16,19 +54,60 @@ struct state {
     int announce_period_ns;
 
     bool status;
+
+    unsigned short curr;
+
+    queue_t* dispatcher;
 };
 
+static void inc_curr(struct state* state) {
+    state->curr = (state->curr + 1) % MAX_SEQ;
+}
+
+static void check_if_reliable(struct state* state, struct neigh* n) {
+
+//    char str[37]; bzero(str, 37); uuid_unparse(n->id, str);
+//    printf("neigh: %s is %d reliable (%d) count: %d notified: %s\n", str, n->count, n->reliability, n->last, n->notified == true ? "yes" : "no");
+    if(!n->notified && n->count > 12) {
+
+        send_event_neighbour_up(state->proto_id, n->id, &n->mac);
+        n->notified = true;
+    } else if (n->notified && n->count < 4) {
+
+        send_event_neighbour_down(state->proto_id, n->id, &n->mac);
+        n->notified = false;
+    }
+}
 
 static void process_msg(YggMessage* msg, struct state* state) {
-    if(state->status) {
-        if(!neighbour_find_by_addr(state->neighs, &msg->header.src_addr.mac_addr)) {
-            uuid_t id; YggMessage_readPayload(msg, NULL, id, sizeof(uuid_t));
-            neighbour_item* neigh = new_neighbour(id, msg->header.src_addr.mac_addr, NULL, 0, NULL);
-            neighbour_add_to_list(state->neighs, neigh);
 
-            send_event_neighbour_up(state->proto_id, id, &msg->header.src_addr.mac_addr);
+    if(msg->Proto_id != state->proto_id) {
+        pushPayload(msg, (char*) &state->curr, sizeof(unsigned short),state->proto_id, &bcast_address);
+        directDispatch(msg);
+        inc_curr(state);
+    } else { //comes from the network
+        unsigned short count;
+        popPayload(msg, (char*) &count, sizeof(unsigned short));
+        if(msg->Proto_id != state->proto_id)
+            filterAndDeliver(msg);
+
+        struct neigh* n = list_find_item(state->neighs, (equal_function) equal_neigh, &msg->header.src_addr.mac_addr);
+        if(!n) {
+            n = malloc(sizeof(struct neigh));
+            n->mac = msg->header.src_addr.mac_addr;
+            n->notified = false;
+            n->reliability = 0;
+            n->last = count;
+            list_add_item_to_tail(state->neighs, n);
         }
+
+        if(msg->Proto_id == state->proto_id)
+            YggMessage_readPayload(msg, NULL, n->id, sizeof(uuid_t));
+
+        mark_msg(n, count);
+        check_if_reliable(state, n);
     }
+
     YggMessage_freePayload(msg);
 }
 
@@ -38,8 +117,11 @@ static void process_timer(YggTimer* timer, struct state* state) {
         YggMessage_initBcast(&msg, state->proto_id);
         YggMessage_addPayload(&msg, (char*) state->myid, sizeof(uuid_t));
 
+        pushPayload(&msg, (char*) &state->curr, sizeof(unsigned short), state->proto_id, &bcast_address);
+
         directDispatch(&msg);
         YggMessage_freePayload(&msg);
+        inc_curr(state);
     }
 }
 
@@ -72,14 +154,22 @@ static void main_loop(main_loop_args* args) {
                 process_msg(&elem.data.msg, state);
                 break;
             case YGG_TIMER:
-                process_timer(&elem.data.timer, state);
+                if(elem.data.timer.proto_dest != state->proto_id)
+                    queue_push(state->dispatcher, &elem);
+                else
+                    process_timer(&elem.data.timer, state);
                 break;
             case YGG_REQUEST:
-                process_request(&elem.data.request, state);
+                if(elem.data.request.proto_dest != state->proto_id)
+                    queue_push(state->dispatcher, &elem);
+                else
+                    process_request(&elem.data.request, state);
                 break;
             default:
+                queue_push(state->dispatcher, &elem);
                 break;
         }
+        free_elem_payload(&elem);
     }
 }
 
@@ -91,6 +181,13 @@ proto_def* discovery_init(discovery_args* args) {
     state->proto_id = args->proto_id;
     state->announce_period_s = args->announce_period_s;
     state->announce_period_ns = args->announce_period_ns;
+    state->curr = 0;
+
+    getmyId(state->myid);
+
+    setBcastAddr(&bcast_address);
+
+    state->dispatcher = interceptProtocolQueue(PROTO_DISPATCH, state->proto_id);
 
     proto_def* discov = create_protocol_definition(state->proto_id, "Discovery", state, NULL);
 

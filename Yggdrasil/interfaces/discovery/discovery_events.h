@@ -21,7 +21,7 @@ typedef enum {
 
 void send_event_neighbour_up(short proto_id, uuid_t neighbour_id, WLANAddr* neighbour_addr);
 
-void send_event_neighbour_down(short proto_id, uuid_t neighbour_id);
+void send_event_neighbour_down(short proto_id, uuid_t neighbour_id, WLANAddr* neighbour_addr);
 
 
 
