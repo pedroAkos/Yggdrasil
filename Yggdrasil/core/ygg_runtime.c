@@ -1969,7 +1969,7 @@ int deliverReply(YggRequest* res) {
  * Other useful read Functions
  ********************************************************/
 
-WLANAddr* getMyWLANAddr() {
+const WLANAddr* getMyWLANAddr() {
 	return &ch.hwaddr;
 }
 

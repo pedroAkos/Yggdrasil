@@ -16,6 +16,7 @@ target_link_libraries(YggdrasilControlProcess_old control_tree control_server co
 
 
 #tools
+#[[
 add_executable(cmdbuildtree tools/buildtree.c)
 target_link_libraries(cmdbuildtree cmdio)
 add_executable(cmdchecktree tools/checktree.c)
@@ -40,5 +41,4 @@ add_executable(cmddisablediscovery tools/disableannounces.c)
 target_link_libraries(cmddisablediscovery cmdio)
 add_executable(cmddebug tools/debugneighbors.c)
 target_link_libraries(cmddebug cmdio)
-
-
+#]]

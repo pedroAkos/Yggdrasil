@@ -19,14 +19,14 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 
-#include "remote_control/utils/control_protocol_utils.h"
-#include "remote_control/utils/cmdio.h"
+#include "remote_control_new/utils/control_protocol_utils.h"
+#include "remote_control_new/utils/cmdio.h"
 
 int main(int argc, char* argv[]) {
 
 	if(argc != 4) {
 		printf("Usage: %s IP PORT \"COMMAND\"\n", argv[0]);
-		printf("COMMAND = Pindex0 Pindex1");
+		printf("COMMAND = Pindex0 Pindex1\n");
 		return 1;
 	}
 

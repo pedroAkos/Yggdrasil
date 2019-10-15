@@ -4,64 +4,11 @@
 
 #include "cmd_server.h"
 
-
-#define TIMEOUT_SEC 60
-#define TIMEOUT_NSEC 0
-
-
-static int executeSimpleOperation(int clientSocket, int OPERATION_CODE, queue_t* inBox) {
-    YggRequest req;
-    YggRequest_init(&req, 401, 400, REQUEST, OPERATION_CODE);
-
-    deliverRequest(&req);
-
-    char* reply = malloc(1000);
-    bzero(reply, 1000);
-
-    queue_t_elem elem;
-    struct timespec timeout;
-    while(1) {
-        timeout.tv_sec = time(NULL) + 10;
-        timeout.tv_nsec = TIMEOUT_NSEC;
-        if( queue_try_timed_pop(inBox, &timeout, &elem) != 1 ) {
-            //A timeout has happened;
-            //Two lines have been commented to disable timeout
-            sprintf(reply,"Operation timed out %d sec %d nsec", TIMEOUT_SEC, TIMEOUT_NSEC);
-            break;
-        } else {
-            //Process the response;
-            if(elem.type == YGG_REQUEST && elem.data.request.request_type == OPERATION_CODE
-               && elem.data.request.request == REPLY && elem.data.request.length >= 1) {
-                char* payload = (char*) elem.data.request.payload;
-                if(payload[0] == '0') {
-                    sprintf(reply, "Command Executed.");
-                } else if (payload[0] == '1') {
-                    sprintf(reply, "Error executing command");
-                } else {
-                    sprintf(reply, "Unexpected value in the reply %c", payload[0]);
-                }
-                break;
-            } else {
-                free_elem_payload(&elem);
-                continue;
-            }
-        }
-    }
-
-    int replyLenght = strlen(reply) + 1;
-
-    int ret = (writefully(clientSocket, &replyLenght, sizeof(int)) > 0 && writefully(clientSocket, reply, replyLenght) > 0 ? 0 : -1);
-
-    free(reply);
-
-    return ret;
-
-}
-
 static int executeGenericOperation(int clientSocket, int OPERATION_CODE, char* payload, int payloadsize, queue_t* inBox) {
     YggRequest req;
     YggRequest_init(&req, 401, 400, REQUEST, OPERATION_CODE);
-    YggRequest_addPayload(&req, payload, payloadsize);
+    if(payload != NULL && payloadsize > 0)
+        YggRequest_addPayload(&req, payload, payloadsize);
 
     deliverRequest(&req);
     YggRequest_freePayload(&req);
@@ -69,38 +16,24 @@ static int executeGenericOperation(int clientSocket, int OPERATION_CODE, char* p
     char* reply;
 
     queue_t_elem elem;
-    struct timespec timeout;
     while(1) {
-        timeout.tv_sec = time(NULL) + TIMEOUT_SEC;
-        timeout.tv_nsec = TIMEOUT_NSEC;
-        if( queue_try_timed_pop(inBox, &timeout, &elem) != 1 ) {
-            //A timeout has happened;
-
-            //Commented to disable the timeout operation
-            reply = malloc(100);
-            bzero(reply, 100);
-            sprintf(reply,"Operation timed out %d sec %d nsec", TIMEOUT_SEC, TIMEOUT_NSEC);
+        queue_pop(inBox, &elem);
+            //Process the response;
+        if(elem.type == YGG_REQUEST && elem.data.request.request_type == OPERATION_CODE
+           && elem.data.request.request == REPLY && elem.data.request.length >= 1) {
+            reply = malloc(elem.data.request.length);
+            memcpy(reply, elem.data.request.payload, elem.data.request.length);
+            free_elem_payload(&elem);
             break;
         } else {
-            //Process the response;
-            if(elem.type == YGG_REQUEST && elem.data.request.request_type == OPERATION_CODE
-               && elem.data.request.request == REPLY && elem.data.request.length >= 1) {
-                reply = malloc(elem.data.request.length);
-                memcpy(reply, elem.data.request.payload, elem.data.request.length);
-                break;
-            } else {
-                free_elem_payload(&elem);
-                continue;
-            }
+            free_elem_payload(&elem);
+            continue;
         }
+
     }
-
     int replyLenght = strlen(reply) + 1;
-
     int ret = (writefully(clientSocket, &replyLenght, sizeof(int)) > 0 && writefully(clientSocket, reply, replyLenght) > 0 ? 0 : -1);
-
     free(reply);
-
     return ret;
 }
 
@@ -111,6 +44,9 @@ static int executeOperationWithPayloadAndConfirmation (int clientSocket, int OPE
     if(readfully(clientSocket, &requestPayloadSize, sizeof(int)) > 0) {
         requestPayload = malloc(requestPayloadSize);
         if(readfully(clientSocket, requestPayload, requestPayloadSize) > 0) {
+            if(*requestPayload == '\0') {
+                free(requestPayload); requestPayload = NULL; requestPayloadSize = 0;
+            }
             return executeGenericOperation(clientSocket, OPERATION_CODE, requestPayload, requestPayloadSize, inBox);
         }
     }
@@ -140,10 +76,10 @@ static void executeClientSession(int clientSocket, struct sockaddr_in* addr, que
 
         switch(command_code) {
             case SETUP:
-                stop = executeSimpleOperation(clientSocket, SETUP, inBox);
+                stop = executeOperationWithPayloadAndConfirmation(clientSocket, SETUP, inBox);
                 break;
             case IS_UP:
-                stop = executeOperationWithConfirmation(clientSocket, IS_UP, inBox);
+                stop = executeOperationWithPayloadAndConfirmation(clientSocket, IS_UP, inBox);
                 break;
             case KILL:
                 stop = executeOperationWithPayloadAndConfirmation(clientSocket, KILL, inBox);
@@ -173,7 +109,7 @@ static void executeClientSession(int clientSocket, struct sockaddr_in* addr, que
                 stop = executeOperationWithConfirmation(clientSocket, GET_NEIGHBORS, inBox);
                 break;
             case DEBUG_NEIGHBOR_TABLE:
-                stop = executeSimpleOperation(clientSocket, DEBUG_NEIGHBOR_TABLE, inBox);
+                stop = executeOperationWithConfirmation(clientSocket, DEBUG_NEIGHBOR_TABLE, inBox);
                 break;
             default:
                 sprintf(reply,"Unknown Command");

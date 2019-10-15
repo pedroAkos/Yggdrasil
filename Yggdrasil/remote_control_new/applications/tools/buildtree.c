@@ -19,13 +19,13 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 
-#include "remote_control/utils/control_protocol_utils.h"
-#include "remote_control/utils/cmdio.h"
+#include "remote_control_new/utils/control_protocol_utils.h"
+#include "remote_control_new/utils/cmdio.h"
 
 int main(int argc, char* argv[]) {
 
-	if(argc != 3) {
-		printf("Usage: %s IP PORT\n", argv[0]);
+	if(argc <= 3) {
+		printf("Usage: %s IP PORT N_PROCESSES <TIMEOUT>\n", argv[0]);
 		return 1;
 	}
 
@@ -35,11 +35,24 @@ int main(int argc, char* argv[]) {
 	address.sin_family = AF_INET;
 	inet_aton(argv[1], &address.sin_addr);
 	address.sin_port = htons( atoi(argv[2]) );
+
+	void* buff = malloc(sizeof(int)*2);
+	int to_write = sizeof(int);
+	int n = atoi(argv[3]);
+	memcpy(buff, &n, sizeof(int));
+	int timeout;
+	if(argc >= 5) {
+        timeout = atoi(argv[4]);
+        memcpy(buff+to_write, &timeout, sizeof(int));
+        to_write += sizeof(int);
+    }
+
 	int success = connect(sock, (const struct sockaddr*) &address, sizeof(address));
 
 	if(success == 0) {
-		if( executeCommand(SETUP, sock) > 0)  {
+		if( executeCommandWithArgument(SETUP, buff, to_write ,sock) > 0)  {
 			//Success
+			free(buff);
 			char* reply = getResponse(sock);
 			if(reply != NULL) {
 				printf("%s", reply);
@@ -52,11 +65,13 @@ int main(int argc, char* argv[]) {
 				return 3;
 			}
 		} else {
+            free(buff);
 			printf("Failed to send request\n");
 			close(sock);
 			return 2;
 		}
 	} else {
+        free(buff);
 		printf("Unable to connect to server.\n");
 		return 1;
 	}

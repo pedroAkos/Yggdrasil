@@ -19,7 +19,7 @@ struct received_msg {
 
     //bool delivered; //if delivered or not
     list* acks; //list of remaining acks
-    YggTimer timeout;
+    //YggTimer timeout;
 };
 
 static bool equal_msg(struct received_msg* msg, const int* hash) {
@@ -42,7 +42,7 @@ struct state {
 
     unsigned short expiration;
     uuid_t myid;
-    WLANAddr* myaddr;
+    const WLANAddr* myaddr;
     short proto_id;
 
     short discov_id;
@@ -78,11 +78,13 @@ static struct received_msg* regist_msg(int mid, void* msg_contents, unsigned sho
     msg->acks = acks;
 
     //msg->delivered = false;
-    YggTimer_init(&msg->timeout, state->proto_id, state->proto_id);
-    YggTimer_set(&msg->timeout, state->timeout_s, state->timeout_ns, 0, 0);
-    YggTimer_setType(&msg->timeout, TIMEOUT);
-    YggTimer_addPayload(&msg->timeout, &mid, sizeof(int));
-    setupTimer(&msg->timeout);
+    YggTimer timeout;
+    YggTimer_init(&timeout, state->proto_id, state->proto_id);
+    YggTimer_set(&timeout, state->timeout_s, state->timeout_ns, 0, 0);
+    YggTimer_setType(&timeout, TIMEOUT);
+    YggTimer_addPayload(&timeout, &mid, sizeof(int));
+    setupTimer(&timeout);
+    YggTimer_freePayload(&timeout);
 
     list_add_item_to_tail(state->pending, msg);
     return msg;
@@ -210,7 +212,6 @@ static void process_timer(YggTimer* timer, struct state* state) {
                 break;
             }
             free(msg->acks);
-            YggTimer_freePayload(&msg->timeout);
             free(msg->msg_contents);
             free(msg);
         }
@@ -224,8 +225,8 @@ static void process_timer(YggTimer* timer, struct state* state) {
                 list_remove_item(state->pending, (equal_function) equal_msg, &msg->hash);
                 list_add_item_to_head(state->received, msg);
             } else {
-                YggTimer_set(&msg->timeout, state->timeout_s, state->timeout_ns, 0, 0);
-                setupTimer(&msg->timeout);
+                YggTimer_set(timer, state->timeout_s, state->timeout_ns, 0, 0);
+                setupTimer(timer);
             }
         }
         YggTimer_freePayload(timer);
@@ -253,7 +254,7 @@ static void process_event(YggEvent* ev, struct state* state) {
         if(ev->notification_id == NEIGHBOUR_UP) {
 
             uuid_t id; YggEvent_readPayload(ev, NULL, id, sizeof(uuid_t)); char str[37]; bzero(str,37); uuid_unparse(id, str);
-            printf("UP: %s\n", str);
+           // printf("UP: %s\n", str);
 
             WLANAddr* addr = malloc(WLAN_ADDR_LEN); YggEvent_readPayload(ev, ev->payload+ sizeof(uuid_t), addr, WLAN_ADDR_LEN);
             if(!list_find_item(state->neighs, (equal_function) equal_addr, addr))
@@ -262,7 +263,7 @@ static void process_event(YggEvent* ev, struct state* state) {
                 free(addr);
         } else if(ev->notification_id == NEIGHBOUR_DOWN) {
             uuid_t id; YggEvent_readPayload(ev, NULL, id, sizeof(uuid_t)); char str[37]; bzero(str,37); uuid_unparse(id, str);
-            printf("DOWN: %s\n", str);
+           // printf("DOWN: %s\n", str);
             WLANAddr addr; YggEvent_readPayload(ev, ev->payload+ sizeof(uuid_t), &addr, WLAN_ADDR_LEN);
             WLANAddr* addr1 = list_remove_item(state->neighs, (equal_function) equal_addr, &addr);
             if(addr1) {

@@ -63,12 +63,53 @@ char* read_line(void)
 
 int executeCommandSetup(int sock) {
 	int command = SETUP;
-	return writefully(sock, &command, sizeof(int));
+    printf("prompt number of nodes in the system (optional: timeout for this operation):\n");
+    char* read = read_line();
+    if(*read == '\0') {
+        printf("ERROR: please specify the number of nodes in the system\n");
+        return -1;
+    }
+    char l[100];
+    bzero(l, 100);
+    memcpy(l, read, strlen(read));
+    char* l2 = l;
+    char* val = strsep(&l2, " ");
+    int v = atoi(val);
+    int t = -1;
+    if(val < 0)
+        return -1;
+    int write_bytes = sizeof(int);
+    if((val = strsep(&l2, " ")) != NULL) {
+        t = atoi(val);
+        write_bytes += sizeof(int);
+    }
+
+    writefully(sock, &command, sizeof(int));
+    writefully(sock, &write_bytes, sizeof(int));
+    if(t > -1) {
+        writefully(sock, &v, sizeof(int));
+        return writefully(sock, &t, sizeof(int));
+    } else
+       return writefully(sock, &v, sizeof(int));
 }
 
 int executeCommandCheck(int sock) {
 	int command = IS_UP;
-	return writefully(sock, &command, sizeof(int));
+
+    printf("prompt (optional: timeout for this operation):\n");
+    char* read = read_line();
+    int read_bytes = strlen(read)+1;
+
+    writefully(sock, &command, sizeof(int));
+    if(*read != '\0') {
+        read_bytes = sizeof(int);
+        int val = atoi(read);
+        writefully(sock, &read_bytes, sizeof(int));
+        return writefully(sock, &val, sizeof(int));
+    } else {
+        writefully(sock, &read_bytes, sizeof(int));
+        return writefully(sock, read, read_bytes);
+    }
 }
 
 int verifyCommandKill(char* order) {
@@ -223,6 +264,7 @@ int prompt(int sock) {
 	switch(code) {
 	case 0:
 		if(executeCommandSetup(sock) >= 0) {
+
 			reply = getResponse(sock);
 		}
 		break;

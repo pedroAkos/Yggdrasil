@@ -318,7 +318,7 @@ int deliverReply(YggRequest* res);
  * @return A char array with the mac address
  */
 char* getMyAddr(char* s2);
-WLANAddr* getMyWLANAddr();
+const WLANAddr* getMyWLANAddr();
 
 /**
  * Fill the parameter addr with the mac address of the process

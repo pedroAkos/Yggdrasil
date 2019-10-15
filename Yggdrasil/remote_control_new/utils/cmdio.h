@@ -19,6 +19,7 @@
 
 int executeCommand(CONTROL_COMMAND_TREE_REQUESTS commandCode, int sock);
 char* getResponse(int sock);
+int executeCommandWithArgument(CONTROL_COMMAND_TREE_REQUESTS commandCode, const void* command, int commandLen, int sock);
 int executeCommandWithStringArgument(CONTROL_COMMAND_TREE_REQUESTS commandCode, const char* command, int sock);
 
 #endif /* TOOLS_UTILS_CMDIO_H_ */

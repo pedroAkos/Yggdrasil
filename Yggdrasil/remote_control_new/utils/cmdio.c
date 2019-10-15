@@ -32,12 +32,21 @@ char* getResponse(int sock) {
 	return answer;
 }
 
+int executeCommandWithArgument(CONTROL_COMMAND_TREE_REQUESTS commandCode, const void* command, int commandLen, int sock) {
+    if(command == NULL || commandLen == 0)
+        return executeCommand(commandCode, sock);
+
+    if(writefully(sock, &commandCode, sizeof(int)) > 0 &&
+       writefully(sock, &commandLen, sizeof(int)) > 0 &&
+       writefully(sock, (void*) command, commandLen) > 0 ) {
+        return 1;
+    }
+    return 0;
+}
+
 int executeCommandWithStringArgument(CONTROL_COMMAND_TREE_REQUESTS commandCode, const char* command, int sock) {
 	int commandLen = strlen(command) + 1;
-	if(writefully(sock, &commandCode, sizeof(int)) > 0 &&
-			writefully(sock, &commandLen, sizeof(int)) > 0 &&
-					writefully(sock, (void*) command, commandLen) > 0 ) {
-		return 1;
-	}
-	return 0;
+	return executeCommandWithArgument(commandCode, command, commandLen, sock);
 }
+
+

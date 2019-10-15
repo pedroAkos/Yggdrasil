@@ -19,8 +19,8 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 
-#include "remote_control/utils/control_protocol_utils.h"
-#include "remote_control/utils/cmdio.h"
+#include "remote_control_new/utils/control_protocol_utils.h"
+#include "remote_control_new/utils/cmdio.h"
 
 int main(int argc, char* argv[]) {
 

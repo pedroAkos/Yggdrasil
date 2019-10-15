@@ -6,6 +6,9 @@
 
 #define MAX_SEQ 10000
 
+#define RELIABLE_THRESHOLD 12
+#define UNRELIABLE_THRESHOLD 4
+
 static WLANAddr bcast_address;
 
 struct neigh {
@@ -15,6 +18,7 @@ struct neigh {
     short last;
     short count;
     bool notified;
+    bool sym;
 };
 
 static void mark_msg(struct neigh* n,  unsigned short msg_num) {
@@ -46,6 +50,7 @@ struct state {
     list* neighs;
 
     uuid_t myid;
+    const WLANAddr* myaddr;
 
     short proto_id;
     YggTimer announce;
@@ -68,12 +73,10 @@ static void check_if_reliable(struct state* state, struct neigh* n) {
 
 //    char str[37]; bzero(str, 37); uuid_unparse(n->id, str);
 //    printf("neigh: %s is %d reliable (%d) count: %d notified: %s\n", str, n->count, n->reliability, n->last, n->notified == true ? "yes" : "no");
-    if(!n->notified && n->count > 12) {
-
+    if(!n->notified && n->count > RELIABLE_THRESHOLD && n->sym) {
         send_event_neighbour_up(state->proto_id, n->id, &n->mac);
         n->notified = true;
-    } else if (n->notified && n->count < 4) {
-
+    } else if (n->notified && (n->count < UNRELIABLE_THRESHOLD || !n->sym)) {
         send_event_neighbour_down(state->proto_id, n->id, &n->mac);
         n->notified = false;
     }
@@ -98,11 +101,20 @@ static void process_msg(YggMessage* msg, struct state* state) {
             n->notified = false;
             n->reliability = 0;
             n->last = count;
+            n->sym = false;
             list_add_item_to_tail(state->neighs, n);
         }
 
-        if(msg->Proto_id == state->proto_id)
-            YggMessage_readPayload(msg, NULL, n->id, sizeof(uuid_t));
+        if(msg->Proto_id == state->proto_id) {
+            n->sym = false;
+            void* ptr = YggMessage_readPayload(msg, NULL, n->id, sizeof(uuid_t));
+            short neigh_count; ptr = YggMessage_readPayload(msg, ptr, &neigh_count, sizeof(short));
+            for(short i = 0; i < neigh_count; i ++) {
+                WLANAddr addr; ptr = YggMessage_readPayload(msg, ptr, addr.data, WLAN_ADDR_LEN);
+                if(memcmp(addr.data, state->myaddr->data, WLAN_ADDR_LEN) == 0)
+                    n->sym = true;
+            }
+        }
 
         mark_msg(n, count);
         check_if_reliable(state, n);
@@ -116,6 +128,13 @@ static void process_timer(YggTimer* timer, struct state* state) {
         YggMessage msg;
         YggMessage_initBcast(&msg, state->proto_id);
         YggMessage_addPayload(&msg, (char*) state->myid, sizeof(uuid_t));
+        YggMessage_addPayload(&msg, (char*) &state->neighs->size, sizeof(short));
+        for(list_item* it = state->neighs->head; it != NULL; it = it->next) {
+            if(((struct neigh*)it->data)->count > RELIABLE_THRESHOLD)
+                YggMessage_addPayload(&msg, (char*) ((struct neigh*) it->data)->mac.data, WLAN_ADDR_LEN);
+            else
+                *((short *)(msg.data +sizeof(uuid_t))) = *((short *)(msg.data +sizeof(uuid_t))) - 1;
+        }
 
         pushPayload(&msg, (char*) &state->curr, sizeof(unsigned short), state->proto_id, &bcast_address);
 
@@ -186,6 +205,7 @@ proto_def* discovery_init(discovery_args* args) {
     getmyId(state->myid);
 
     setBcastAddr(&bcast_address);
+    state->myaddr = getMyWLANAddr();
 
     state->dispatcher = interceptProtocolQueue(PROTO_DISPATCH, state->proto_id);
 

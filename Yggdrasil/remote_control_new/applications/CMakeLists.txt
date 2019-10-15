@@ -20,31 +20,34 @@ target_link_libraries(YggdrasilControlProcess yggcore_wireless_new cmdio_new com
 
 
 
-#tools
-#[[
-add_executable(cmdbuildtree tools/buildtree.c)
-target_link_libraries(cmdbuildtree cmdio)
-add_executable(cmdchecktree tools/checktree.c)
-target_link_libraries(cmdchecktree cmdio)
+add_executable(cmdsetup tools/buildtree.c)
+target_link_libraries(cmdsetup cmdio_new)
+add_executable(cmdcheck tools/checktree.c)
+target_link_libraries(cmdcheck cmdio_new)
 add_executable(cmdgetneighbors tools/getneighbors.c)
-target_link_libraries(cmdgetneighbors cmdio)
+target_link_libraries(cmdgetneighbors cmdio_new)
 add_executable(cmdexecuteexperience tools/beginexperience.c)
-target_link_libraries(cmdexecuteexperience cmdio)
+target_link_libraries(cmdexecuteexperience cmdio_new)
 add_executable(cmdterminateexperience tools/terminateexperience.c)
-target_link_libraries(cmdterminateexperience cmdio)
+target_link_libraries(cmdterminateexperience cmdio_new)
 add_executable(cmdchangevalue tools/changevalue.c)
-target_link_libraries(cmdchangevalue cmdio)
+target_link_libraries(cmdchangevalue cmdio_new)
 add_executable(cmdchangelink tools/changelink.c)
-target_link_libraries(cmdchangelink cmdio)
+target_link_libraries(cmdchangelink cmdio_new)
 add_executable(cmdreboot tools/reboot.c)
-target_link_libraries(cmdreboot cmdio)
+target_link_libraries(cmdreboot cmdio_new)
 add_executable(cmdshutdown tools/shutdown.c)
-target_link_libraries(cmdshutdown cmdio)
+target_link_libraries(cmdshutdown cmdio_new)
 add_executable(cmdenablediscovery tools/enableannounces.c)
-target_link_libraries(cmdenablediscovery cmdio)
+target_link_libraries(cmdenablediscovery cmdio_new)
 add_executable(cmddisablediscovery tools/disableannounces.c)
-target_link_libraries(cmddisablediscovery cmdio)
+target_link_libraries(cmddisablediscovery cmdio_new)
 add_executable(cmddebug tools/debugneighbors.c)
-target_link_libraries(cmddebug cmdio)
-]]
+target_link_libraries(cmddebug cmdio_new)
+
+
+add_custom_target(YggControlBundle)
+add_dependencies(YggControlBundle YggdrasilControlProcess YggdrasilControlClient
+        cmdsetup cmdcheck cmdgetneighbors cmdexecuteexperience cmdterminateexperience cmdchangevalue cmdchangelink
+        cmdreboot cmdshutdown cmdenablediscovery cmddisablediscovery cmddebug)
 
