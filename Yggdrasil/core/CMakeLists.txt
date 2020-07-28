@@ -46,13 +46,13 @@ add_library(yggcore_wireless_new
 target_compile_definitions(yggcore_wireless PUBLIC WIRELESS_NETWORKS MEM_DEBUG)
 
 target_compile_definitions(yggcore_wireless_new PUBLIC WIRELESS_NETWORKS)
-target_link_libraries(yggcore_wireless_new PUBLIC ygglib_wireless_new PUBLIC gen_data_structs m pthread uuid rt)
+target_link_libraries(yggcore_wireless_new PUBLIC ygglib_wireless_new PUBLIC gen_data_structs m pthread uuid rt config)
 target_include_directories(yggcore_wireless_new PUBLIC . ../../Yggdrasil-LowLevelLib)
 
 #target_compile_options(yggcore_wireless BEFORE PUBLIC  -lm -pthread -luuid -lrt)
 #set_property(TARGET yggcore_wireless APPEND_STRING PROPERTY LINK_FLAGS "-lm -luuid -lrt")
 #target_link_options(yggcore_wireless PUBLIC "-lm -luuid -lrt")
-target_link_libraries(yggcore_wireless PUBLIC ygglib_wireless PUBLIC gen_data_structs m pthread uuid rt)
+target_link_libraries(yggcore_wireless PUBLIC ygglib_wireless PUBLIC gen_data_structs m pthread uuid rt config)
 target_include_directories(yggcore_wireless PUBLIC . ../../Yggdrasil-LowLevelLib)
 
 add_library(yggcore_ip
@@ -74,5 +74,5 @@ target_compile_definitions(yggcore_ip PUBLIC IP_NETWORKS)
 #set_property(TARGET yggcore_ip APPEND_STRING PROPERTY LINK_FLAGS "-lm -luuid -lrt")
 #target_link_options(yggcore_ip PUBLIC "-lm -luuid -lrt")
 
-target_link_libraries(yggcore_ip PUBLIC ygglib_ip PUBLIC gen_data_structs m pthread uuid rt)
+target_link_libraries(yggcore_ip PUBLIC ygglib_ip PUBLIC gen_data_structs m pthread uuid rt config)
 target_include_directories(yggcore_ip PUBLIC . ../../Yggdrasil-LowLevelLib)

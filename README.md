@@ -66,6 +66,7 @@ The project present the following dependencies:
 
 * libnl3 - `sudo apt install libnl-3-dev` - This is used to configure the radio devices for applications operating in wireless ad hoc networks; (applications that only operate over traditional ip networks do not require this).
 * uuid - `sudo apt install uuid-dev` - This is used throughout the whole project to easily identify elements uniquely.
+* libconfig - `sudo apt install libconfig-dev` - This is used to parse config files.
 
 This is a cmake project. You will need cmake to build:
 * cmake - `sudo apt install cmake`

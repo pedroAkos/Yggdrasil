@@ -13,6 +13,7 @@
 #define CORE_UTILS_H_
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <uuid/uuid.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -23,9 +24,9 @@
 #include <string.h>
 #include <stdarg.h>
 #include <math.h>
+#include <libconfig.h>
 
 #include "proto_data_struct.h"
-
 
 
 typedef enum bool_t {false, true} bool;
@@ -67,5 +68,10 @@ void setBcastAddr(WLANAddr* addr);
 
 int getRandomInt(int min, int max);
 double getRandomProb();
+
+
+config_t* read_config_file(char* config_file);
+NetworkConfig* read_network_properties(config_t* config);
+void free_config(config_t** config);
 
 #endif /* CORE_UTILS_H_ */

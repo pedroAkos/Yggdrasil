@@ -243,3 +243,73 @@ double getRandomProb() {
 	return getRandomInt(0, 100) / 100.0;
 }
 
+
+
+
+config_t* read_config_file(char* config_file) {
+    config_t* cf = malloc(sizeof(config_t));
+    config_init(cf);
+
+    if(!config_read_file(cf, config_file)) {
+        fprintf(stderr, "%s:%d - %s\n",
+                config_error_file(cf),
+                config_error_line(cf),
+                config_error_text(cf));
+        config_destroy(cf);
+        return NULL;
+    }
+
+    return cf;
+}
+
+NetworkConfig* read_network_properties(config_t* config) {
+    const char* type = NULL;
+    if(!config_lookup_string(config,  "net.type", &type)) {
+        fprintf(stderr, "net.type not defined\n");
+        return NULL;
+    }
+
+    if(strcmp(type, "MAC") == 0) {
+        const char* adhoc = NULL;
+        const char* name = NULL;
+        const char* filter = NULL;
+        int freq, nscan, mandatory;
+        if(!config_lookup_string(config, "net.adhoc.type", &adhoc)){
+            fprintf(stderr, "net.adhoc.type not defined, setting default\n");
+            adhoc = "AdHoc";
+        }
+        if(!config_lookup_string(config, "net.adhoc.name", &name)){
+            fprintf(stderr, "net.adhoc.name not defined, setting default\n");
+            name = "defaultNet";
+        }
+        if(!config_lookup_string(config, "net.adhoc.filter", &filter)){
+            fprintf(stderr, "net.adhoc.filter not defined, setting default\n");
+            filter = "YGG";
+        }
+        if(!config_lookup_int(config, "net.adhoc.freq", &freq)){
+            fprintf(stderr, "net.adhoc.freq not defined, setting default\n");
+            freq = 11;
+        }
+        if(!config_lookup_int(config, "net.adhoc.nscan", &nscan)){
+            fprintf(stderr, "net.adhoc.nscan not defined, setting default\n");
+            nscan = 3;
+        }
+        if(!config_lookup_bool(config, "net.adhoc.mandatory", &mandatory)){
+            fprintf(stderr, "net.adhoc.mandatory not defined, setting default\n");
+            mandatory = 0;
+        }
+        return defineWirelessNetworkConfig((char*)adhoc, freq, nscan, mandatory, (char*) name, filter);
+
+    } else if (strcmp(type, "IP") == 0) {
+        return NULL;
+    } else {
+        fprintf(stderr, "Unknown net.type defined: %s\n", type);
+        return NULL;
+    }
+}
+
+void free_config(config_t** config) {
+    config_destroy(*config);
+    free(*config);
+    *config = NULL;
+}

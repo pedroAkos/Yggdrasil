@@ -435,8 +435,11 @@ static void process_timeout(YggTimer* t) {
 
 int main(int argc, char* argv[]) {
 
-	char* type = "AdHoc"; //should be an argument
-	NetworkConfig* ntconf = defineWirelessNetworkConfig(type, 11, 5, 1, "pis", "CTL");
+    char* configFile = argv[1];
+    config_t* cf = read_config_file(configFile);
+    NetworkConfig* ntconf = read_network_properties(cf);
+    //char* type = "AdHoc"; //should be an argument
+	//NetworkConfig* ntconf = defineWirelessNetworkConfig(type, 11, 5, 1, "pis", "CTL");
 
 	pending_requests = list_init();
 

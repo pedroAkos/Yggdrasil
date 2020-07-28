@@ -187,7 +187,7 @@ static void process_msg(YggMessage* msg, struct state* state) {
         r_msg = p_msg;
     }
 
-    if(list_find_item(acks, (equal_function) equal_addr, state->myaddr) || send)
+    if(list_find_item(acks, (equal_function) equal_addr, (void*) state->myaddr) || send)
         trigger_oneHopBcast(state, mid, r_msg->acks, proto, payload, payload_len, r_msg);
 
     while(acks->size > 0) {
@@ -221,7 +221,7 @@ static void process_timer(YggTimer* timer, struct state* state) {
             trigger_oneHopBcast(state, msg->hash, msg->acks, msg->proto_request, msg->msg_contents, msg->msg_size, msg);
 
             if(msg->acks->size == 0) { //in case msg was set for transmission without any known neighbours - solution should default to best effort
-                deliver_msg(msg->proto_request, msg->msg_contents, msg->msg_size, state->myaddr);
+                deliver_msg(msg->proto_request, msg->msg_contents, msg->msg_size, (WLANAddr*) state->myaddr);
                 list_remove_item(state->pending, (equal_function) equal_msg, &msg->hash);
                 list_add_item_to_head(state->received, msg);
             } else {

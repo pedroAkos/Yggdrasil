@@ -57,6 +57,12 @@ int channelToFreq(int channel) {
             return 2457;
         case 11:
             return 2462;
+        case 12:
+            return 2467;
+        case 13:
+            return 2472;
+        case 14:
+            return 2484;
         default:
             return channel;
     }
