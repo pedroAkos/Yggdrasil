@@ -8,4 +8,4 @@ project(Protocols)
 add_subdirectory(ip)
 add_subdirectory(wireless)
 
-add_subdirectory(generic)
+#add_subdirectory(generic)
